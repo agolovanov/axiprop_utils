@@ -1,0 +1,15 @@
+[project]
+name = "axiprop_utils"
+version = "0.1.0"
+description = "Helper functions for the Axiprop code"
+authors = [{ name = "Anton Golovanov" }]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["axiprop_utils*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
