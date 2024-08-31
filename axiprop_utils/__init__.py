@@ -53,7 +53,7 @@ def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
     return np.exp(1j * phi)
 
 
-def analyze_field(scl, r_units='um', lambda_lim=None, t_lim=None, return_result=False, plot_field=True, figtitle=None):
+def analyze_field(scl, *, r_units='um', lambda_lim=None, t_lim=None, r_lim=None, return_result=False, plot_field=True, figtitle=None):
     import matplotlib.pyplot as plt
     import mpl_utils
     import pint
@@ -96,6 +96,22 @@ def analyze_field(scl, r_units='um', lambda_lim=None, t_lim=None, return_result=
     spectral_power_lambda = (spectral_power * 2 * np.pi * c / lambda_axis**2).to('mJ/nm')
     energy_ft = np.trapz(spectral_power, dx=domega).to('J')
 
+    output = {
+        'k0': k0,
+        'a0': a0,
+        'intensity': intensity,
+        'intensity_axis': intensity_axis,
+        'spectral_power': spectral_power,
+        'k': k_axis,
+        'power': power,
+        't': t_axis,
+        'lambda': lambda_axis,
+        'spectral_power_lambda': spectral_power_lambda,
+        'r_axis': r_axis,
+        'energy_flux': energy_flux,
+        'energy': energy,
+    }
+
     if plot_field:
         fig, axes_grid = plt.subplots(figsize=(7, 4), ncols=3, nrows=2)
         axes_iter = iter(axes_grid.flatten())
@@ -113,6 +129,12 @@ def analyze_field(scl, r_units='um', lambda_lim=None, t_lim=None, return_result=
 
         if lambda_lim is None:
             lambda_lim = (np.min(lambda_axis), np.max(lambda_axis))
+
+        if r_lim is None:
+            r_lim = (np.min(r_axis), np.max(r_axis))
+        else:
+            r_lim = (np.min(r_axis), r_lim.to(r_units))
+            
         omega_lim = (2 * np.pi * c / lambda_lim[1], 2 * np.pi * c / lambda_lim[0])
         omega_relative_lim = ((omega / omega0).m_as('') for omega in omega_lim)
 
@@ -122,6 +144,7 @@ def analyze_field(scl, r_units='um', lambda_lim=None, t_lim=None, return_result=
         ax.set_xlabel(f'Duration, {t_axis.units}')
         ax.set_ylabel(f'Radius, {r_axis.units}')
         ax.set_xlim(t_lim)
+        ax.set_ylim(r_lim)
         remove_grid(ax)
 
         ax = next(axes_iter)
@@ -135,13 +158,14 @@ def analyze_field(scl, r_units='um', lambda_lim=None, t_lim=None, return_result=
         ax.plot(r_axis, energy_flux)
         ax.set_xlabel(f'Radius, {r_axis.units}')
         ax.set_ylabel('Energy flux, J/cm$^2$')
-        ax.set_xlim(np.min(r_axis), np.max(r_axis))
+        ax.set_xlim(r_lim)
         ax.set_ylim(ymin=0)
 
         ax = next(axes_iter)
         extent = mpl_utils.calculate_extent((omega_axis / omega0).m_as(''), r_axis)
         ax.imshow(np.abs(E_ft.T.magnitude), extent=extent, aspect='auto', origin='lower')
         ax.set_xlim(omega_relative_lim)
+        ax.set_ylim(r_lim)
         ax.set_xlabel(r'$\omega/\omega_0$')
         ax.set_ylabel(f'Radius, {r_axis.units}')
         remove_grid(ax)
@@ -155,22 +179,11 @@ def analyze_field(scl, r_units='um', lambda_lim=None, t_lim=None, return_result=
 
         fig.suptitle(figtitle)
 
+        output['figure'] = fig
+        output['axes'] = axes_grid
+
     if return_result:
-        return {
-            'k0': k0,
-            'a0': a0,
-            'intensity': intensity,
-            'intensity_axis': intensity_axis,
-            'spectral_power': spectral_power,
-            'k': k_axis,
-            'power': power,
-            't': t_axis,
-            'lambda': lambda_axis,
-            'spectral_power_lambda': spectral_power_lambda,
-            'r_axis': r_axis,
-            'energy_flux': energy_flux,
-            'energy': energy,
-        }
+        return output
 
 
 def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
