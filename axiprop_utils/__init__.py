@@ -1,7 +1,6 @@
 import numpy as np
-from mpl_utils import remove_grid
-
 from axiprop.containers import ScalarFieldEnvelope
+from mpl_utils import remove_grid
 
 
 def mirror_parabolic(kz, r, f0):
@@ -53,7 +52,9 @@ def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
     return np.exp(1j * phi)
 
 
-def analyze_field(scl, *, r_units='um', lambda_lim=None, t_lim=None, r_lim=None, return_result=False, plot_field=True, figtitle=None):
+def analyze_field(
+    scl, *, r_units='um', lambda_lim=None, t_lim=None, r_lim=None, return_result=False, plot_field=True, figtitle=None
+):
     import matplotlib.pyplot as plt
     import mpl_utils
     import pint
@@ -134,7 +135,7 @@ def analyze_field(scl, *, r_units='um', lambda_lim=None, t_lim=None, r_lim=None,
             r_lim = (np.min(r_axis), np.max(r_axis))
         else:
             r_lim = (np.min(r_axis), r_lim.to(r_units))
-            
+
         omega_lim = (2 * np.pi * c / lambda_lim[1], 2 * np.pi * c / lambda_lim[0])
         omega_relative_lim = ((omega / omega0).m_as('') for omega in omega_lim)
 
