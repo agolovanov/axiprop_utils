@@ -373,6 +373,26 @@ def envelope_from_time_series(time_series: dict, iteration):
     return scl
 
 
+def apply_spectral_mutliplier(envelope: ScalarFieldEnvelope, multiplier: np.ndarray) -> ScalarFieldEnvelope:
+    """Apply spectral multiplier to the envelope.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        the envelope to be modified
+    multiplier : np.ndarray
+        the spectral multiplier array
+
+    Returns
+    -------
+    ScalarFieldEnvelope
+        The new envelope with the applied multiplier
+    """
+    envelope_new = ScalarFieldEnvelope(k0=envelope.k0, t_axis=envelope.t, n_dump=envelope.n_dump)
+    envelope_new.import_field_ft(envelope.Field_ft * multiplier, r_axis=envelope.r, transform=True)
+    return envelope_new
+
+
 def save_to_lasy(envelope: ScalarFieldEnvelope, filename):
     from lasy.laser import Laser
     from lasy.profiles.gaussian_profile import GaussianProfile
