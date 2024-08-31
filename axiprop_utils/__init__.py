@@ -9,6 +9,7 @@ if typing.TYPE_CHECKING:
 
     import matplotlib
     import matplotlib.figure
+    from axiprop.lib import PropagatorResampling, PropagatorSymmetric
 
 ureg = pint.get_application_registry()
 
@@ -340,10 +341,18 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
     return res
 
 
-def create_symmetric_propagator(envelope: ScalarFieldEnvelope):
+def create_symmetric_propagator(envelope: ScalarFieldEnvelope) -> 'PropagatorSymmetric':
     from axiprop.lib import PropagatorSymmetric
 
     return PropagatorSymmetric((np.max(envelope.r), envelope.r.size), envelope.k_freq)
+
+
+def create_resampling_propagator(
+    envelope: ScalarFieldEnvelope, R_new: pint.Quantity, Nr_new: int
+) -> 'PropagatorResampling':
+    from axiprop.lib import PropagatorResampling
+
+    return PropagatorResampling(r_axis=envelope.r, kz_axis=envelope.k_freq, r_axis_new=(R_new.m_as('m'), Nr_new))
 
 
 def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
