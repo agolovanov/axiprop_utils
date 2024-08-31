@@ -1,6 +1,16 @@
+import typing
+
 import numpy as np
+import pint
 from axiprop.containers import ScalarFieldEnvelope
-from mpl_utils import remove_grid
+
+if typing.TYPE_CHECKING:
+    from typing import Any, Tuple
+
+    import matplotlib
+    import matplotlib.figure
+
+ureg = pint.get_application_registry()
 
 
 def mirror_parabolic(kz, r, f0):
@@ -52,22 +62,143 @@ def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
     return np.exp(1j * phi)
 
 
-def analyze_field(
-    scl, *, r_units='um', lambda_lim=None, t_lim=None, r_lim=None, return_result=False, plot_field=True, figtitle=None
-):
+def plot_field(
+    field: ScalarFieldEnvelope | dict,
+    *,
+    r_units: pint.Unit | str = 'um',
+    lambda_lim: 'Tuple[pint.Quantity, pint.Quantity] | None' = None,
+    t_lim: 'Tuple[pint.Quantity, pint.Quantity] | None' = None,
+    r_lim: pint.Quantity | None = None,
+    figtitle: str | None = None,
+) -> 'Tuple[matplotlib.figure.Figure, Any]':
+    """Plots the scalar field envelope.
+
+    Parameters
+    ----------
+    field : ScalarFieldEnvelope | dict
+        either the envelope or the result of `analyze_field` run on it.
+    r_units : pint.Unit | str, optional
+        units to be used for the r axis, by default 'um'
+    lambda_lim : Tuple[pint.Quantity, pint.Quantity], optional
+        limits for the wavelength axis, by default None
+    t_lim : Tuple[pint.Quantity, pint.Quantity], optional
+        limits for the time axis, by default None
+    r_lim : pint.Quantity, optional
+        upper limit for the r axis, by default None
+    figtitle : str, optional
+        the title of the figure, by default None
+
+    Returns
+    -------
+    Tuple[matplotlib.figure.Figure, Any]
+        figure and axes created by matplotlib for further customization
+    """
+
     import matplotlib.pyplot as plt
     import mpl_utils
-    import pint
+    from mpl_utils import remove_grid
+
+    c = ureg['speed_of_light']
+
+    if isinstance(field, ScalarFieldEnvelope):
+        field = analyze_field(field)
+
+    scl = field['envelope']
+    E = scl.Field * ureg['V/m']
+    omega_axis = field['omega']
+    domega = omega_axis[1] - omega_axis[0]
+    E_ft = np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega
+    t_axis = field['t']
+    lambda_axis = field['lambda']
+    r_axis = field['r']
+    omega0 = field['omega0']
+    power = field['power']
+
+    fig, axes_grid = plt.subplots(figsize=(7, 4), ncols=3, nrows=2)
+    axes_iter = iter(axes_grid.flatten())
+
+    print(f'Peak field {field["max_field"]:.3g~}')
+    print(f'Peak a0 {field["a0"]:.3g}')
+    print(f'Peak power {np.max(power):.3g~}')
+    print(f'Energy {field["energy"]:.3g~}')
+    print(f'Duration {field["duration_global"]:.3g~} (global), {field["duration_on_axis"]:.3g~} (on-axis)')
+
+    if t_lim is None:
+        t_lim = np.min(t_axis), np.max(t_axis)
+
+    if lambda_lim is None:
+        lambda_lim = (np.min(lambda_axis), np.max(lambda_axis))
+
+    if r_lim is None:
+        r_lim = (np.min(r_axis), np.max(r_axis))
+    else:
+        r_lim = (np.min(r_axis), r_lim.to(r_units))
+
+    omega_lim = (2 * np.pi * c / lambda_lim[1], 2 * np.pi * c / lambda_lim[0])
+    omega_relative_lim = ((omega / omega0).m_as('') for omega in omega_lim)
+
+    ax = next(axes_iter)
+    extent = mpl_utils.calculate_extent(t_axis, r_axis)
+    ax.imshow(np.abs(E.T.magnitude), extent=extent, aspect='auto', origin='lower')
+    ax.set_xlabel(f'Duration, {t_axis.units}')
+    ax.set_ylabel(f'Radius, {r_axis.units}')
+    ax.set_xlim(t_lim)
+    ax.set_ylim(r_lim)
+    remove_grid(ax)
+
+    ax = next(axes_iter)
+    ax.plot(t_axis, power)
+    ax.set_xlabel(f'Duration, {t_axis.units}')
+    ax.set_ylabel(f'Power, {power.units}')
+    ax.set_xlim(t_lim)
+    ax.set_ylim(ymin=0)
+
+    ax = next(axes_iter)
+    ax.plot(r_axis, field['energy_flux'].to('J/cm^2'))
+    ax.set_xlabel(f'Radius, {r_axis.units}')
+    ax.set_ylabel('Energy flux, J/cm$^2$')
+    ax.set_xlim(r_lim)
+    ax.set_ylim(ymin=0)
+
+    ax = next(axes_iter)
+    extent = mpl_utils.calculate_extent((omega_axis / omega0).m_as(''), r_axis)
+    ax.imshow(np.abs(E_ft.T.magnitude), extent=extent, aspect='auto', origin='lower')
+    ax.set_xlim(omega_relative_lim)
+    ax.set_ylim(r_lim)
+    ax.set_xlabel(r'$\omega/\omega_0$')
+    ax.set_ylabel(f'Radius, {r_axis.units}')
+    remove_grid(ax)
+
+    ax = next(axes_iter)
+    ax.plot(lambda_axis[lambda_axis > 0], field['spectral_power_lambda'][lambda_axis > 0].to('mJ/nm'))
+    ax.set_xlim(lambda_lim)
+    ax.set_ylim(ymin=0)
+    ax.set_xlabel('Wavelength, nm')
+    ax.set_ylabel('Spectral power, mJ/nm')
+
+    fig.suptitle(figtitle)
+
+    return fig, axes_grid
+
+
+def analyze_field(
+    scl: ScalarFieldEnvelope,
+    *,
+    r_units='um',
+    plot_field=False,
+    **plot_kwargs,
+):
     from pic_utils.functions import fwhm
 
-    ureg = pint.get_application_registry()
+    if not plot_field and plot_kwargs:
+        raise ValueError(f'Additional parameters supplied: {plot_kwargs.keys()}, but plot_field is False')
 
     c = ureg['speed_of_light']
     eps0 = ureg['vacuum_permittivity']
     e = ureg['elementary_charge']
     m = ureg['electron_mass']
 
-    E_tmp = scl.Field * ureg['V/m']
+    E = scl.Field * ureg['V/m']
 
     t_axis = (scl.t * ureg.s).to('fs')
     r_axis = (scl.r * ureg.m).to(r_units)
@@ -76,10 +207,11 @@ def analyze_field(
     dr = r_axis[1] - r_axis[0]
     dt = t_axis[1] - t_axis[0]
 
-    intensity = (c * eps0 * np.abs(E_tmp) ** 2 / 2).to('W/cm^2')
+    intensity = (c * eps0 * np.abs(E) ** 2 / 2).to('W/cm^2')
     intensity_axis = intensity[0, :]
 
-    a0 = (e * np.max(np.abs(E_tmp)) / m / c / omega0).m_as('')
+    max_field = np.max(np.abs(E)).to('V/m')
+    a0 = (e * max_field / m / c / omega0).m_as('')
 
     power = np.trapz(intensity * r_axis * 2 * np.pi, dx=dr).to('TW')
     energy = np.trapz(power, dx=t_axis[1] - t_axis[0]).to('J')
@@ -95,96 +227,36 @@ def analyze_field(
     E_ft = np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega
     spectral_power = (2 * np.pi * c * eps0 * np.trapz(np.abs(E_ft) ** 2 * r_axis * np.pi, dx=dr)).to('J s')
     spectral_power_lambda = (spectral_power * 2 * np.pi * c / lambda_axis**2).to('mJ/nm')
-    energy_ft = np.trapz(spectral_power, dx=domega).to('J')
 
     output = {
+        'envelope': scl,
         'k0': k0,
+        'omega0': omega0,
         'a0': a0,
         'intensity': intensity,
-        'intensity_axis': intensity_axis,
+        'intensity_on_axis': intensity_axis,
         'spectral_power': spectral_power,
         'k': k_axis,
         'power': power,
         't': t_axis,
         'lambda': lambda_axis,
+        'omega': omega_axis,
         'spectral_power_lambda': spectral_power_lambda,
-        'r_axis': r_axis,
+        'r': r_axis,
         'energy_flux': energy_flux,
         'energy': energy,
+        'max_field': max_field,
+        'duration_global': duration,
+        'duration_on_axis': on_axis_duration,
     }
 
     if plot_field:
-        fig, axes_grid = plt.subplots(figsize=(7, 4), ncols=3, nrows=2)
-        axes_iter = iter(axes_grid.flatten())
-
-        print(f'Peak field {np.max(np.abs(E_tmp)).to("V/m"):.3g~}')
-        print(f'Peak a0 {a0:.3g}')
-        print(f'Peak power {np.max(power):.3g~}')
-        print(
-            f'Energy {energy:.3g~} ({scl.Energy:.3g} J from scl), Fourier: {energy_ft:.3g~} ({scl.Energy_ft:.3g} J from scl)'
-        )
-        print(f'Duration {duration:.3g~} (global), {on_axis_duration:.3g~} (on-axis)')
-
-        if t_lim is None:
-            t_lim = np.min(t_axis), np.max(t_axis)
-
-        if lambda_lim is None:
-            lambda_lim = (np.min(lambda_axis), np.max(lambda_axis))
-
-        if r_lim is None:
-            r_lim = (np.min(r_axis), np.max(r_axis))
-        else:
-            r_lim = (np.min(r_axis), r_lim.to(r_units))
-
-        omega_lim = (2 * np.pi * c / lambda_lim[1], 2 * np.pi * c / lambda_lim[0])
-        omega_relative_lim = ((omega / omega0).m_as('') for omega in omega_lim)
-
-        ax = next(axes_iter)
-        extent = mpl_utils.calculate_extent(t_axis, r_axis)
-        ax.imshow(np.abs(E_tmp.T.magnitude), extent=extent, aspect='auto', origin='lower')
-        ax.set_xlabel(f'Duration, {t_axis.units}')
-        ax.set_ylabel(f'Radius, {r_axis.units}')
-        ax.set_xlim(t_lim)
-        ax.set_ylim(r_lim)
-        remove_grid(ax)
-
-        ax = next(axes_iter)
-        ax.plot(t_axis, power)
-        ax.set_xlabel(f'Duration, {t_axis.units}')
-        ax.set_ylabel(f'Power, {power.units}')
-        ax.set_xlim(t_lim)
-        ax.set_ylim(ymin=0)
-
-        ax = next(axes_iter)
-        ax.plot(r_axis, energy_flux)
-        ax.set_xlabel(f'Radius, {r_axis.units}')
-        ax.set_ylabel('Energy flux, J/cm$^2$')
-        ax.set_xlim(r_lim)
-        ax.set_ylim(ymin=0)
-
-        ax = next(axes_iter)
-        extent = mpl_utils.calculate_extent((omega_axis / omega0).m_as(''), r_axis)
-        ax.imshow(np.abs(E_ft.T.magnitude), extent=extent, aspect='auto', origin='lower')
-        ax.set_xlim(omega_relative_lim)
-        ax.set_ylim(r_lim)
-        ax.set_xlabel(r'$\omega/\omega_0$')
-        ax.set_ylabel(f'Radius, {r_axis.units}')
-        remove_grid(ax)
-
-        ax = next(axes_iter)
-        ax.plot(lambda_axis[lambda_axis > 0], spectral_power_lambda[lambda_axis > 0])
-        ax.set_xlim(lambda_lim)
-        ax.set_ylim(ymin=0)
-        ax.set_xlabel('Wavelength, nm')
-        ax.set_ylabel('Spectral power, mJ/nm')
-
-        fig.suptitle(figtitle)
-
+        plot_field_func = globals()['plot_field']  # hack around shadowing by the local parameter
+        fig, axes = plot_field_func(output, **plot_kwargs)
         output['figure'] = fig
-        output['axes'] = axes_grid
+        output['axes'] = axes
 
-    if return_result:
-        return output
+    return output
 
 
 def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
