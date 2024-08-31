@@ -382,7 +382,7 @@ def envelope_from_time_series(time_series: dict, iteration):
     return scl
 
 
-def apply_spectral_mutliplier(envelope: ScalarFieldEnvelope, multiplier: np.ndarray) -> ScalarFieldEnvelope:
+def apply_spectral_multiplier(envelope: ScalarFieldEnvelope, multiplier: np.ndarray) -> ScalarFieldEnvelope:
     """Apply spectral multiplier to the envelope.
 
     Parameters
