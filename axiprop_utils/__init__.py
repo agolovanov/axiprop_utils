@@ -288,7 +288,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
 
         sclDiag = ScalarFieldEnvelope(k0=k0, t_axis=t_axis.m_as('s'), n_dump=4)
         sclDiag.import_field_ft(field_array[i], t_loc=t_loc, r_axis=r_axis.m_as('m'), transform=True)
-        analysis = analyze_field(sclDiag, plot_field=False, return_result=True)
+        analysis = analyze_field(sclDiag)
 
         max_intensity_transverse[i] = np.max(analysis['intensity'], axis=0).m_as('W/cm^2')
 
