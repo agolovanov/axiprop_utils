@@ -72,7 +72,7 @@ def plot_field(
     r_lim: pint.Quantity | None = None,
     figtitle: str | None = None,
 ) -> 'Tuple[matplotlib.figure.Figure, Any]':
-    """Plots the scalar field envelope.
+    """Plot the scalar field envelope.
 
     Parameters
     ----------
@@ -94,7 +94,6 @@ def plot_field(
     Tuple[matplotlib.figure.Figure, Any]
         figure and axes created by matplotlib for further customization
     """
-
     import matplotlib.pyplot as plt
     import mpl_utils
     from mpl_utils import remove_grid
@@ -111,7 +110,7 @@ def plot_field(
     E_ft = np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega
     t_axis = field['t']
     lambda_axis = field['lambda']
-    r_axis = field['r']
+    r_axis = field['r'].to(r_units)
     omega0 = field['omega0']
     power = field['power']
 
