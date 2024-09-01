@@ -493,13 +493,30 @@ def add_pulse_front_curvature(envelope: ScalarFieldEnvelope, pfc):
     )
 
 
-def propagate_envelope(propagator, envelope: ScalarFieldEnvelope, distance):
-    ureg = distance._REGISTRY
+def propagate_envelope(
+    envelope: ScalarFieldEnvelope, distance: pint.Quantity, propagator: 'PropagatorResampling'
+) -> ScalarFieldEnvelope:
+    """Propagate an envelope to a specific coordinate.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        Envelope to be propagated
+    distance : pint.Quantity
+        Propagation distance
+    propagator : PropagatorResampling
+        The propagator
+
+    Returns
+    -------
+    ScalarFieldEnvelope
+        Envelope after the propagation.
+    """
     c = ureg['speed_of_light']
 
     t_loc = envelope.t.min() + (distance / c).m_as('s')
     E_propagated = propagator.step(envelope.Field_ft, distance.m_as('m'))
 
     new_envelope = ScalarFieldEnvelope(envelope.k0, envelope.t, envelope.n_dump)
-    new_envelope.import_field_ft(E_propagated, t_loc=t_loc, r=propagator.r_new, transform=True)
+    new_envelope.import_field_ft(E_propagated, t_loc=t_loc, r_axis=propagator.r_new, transform=True)
     return new_envelope
