@@ -29,6 +29,7 @@ def hole(r, r_hole):
     return mirror_mask
 
 
+@ureg.wraps(None, (ureg.m**-1, ureg.m, ureg.m, ureg.m, ureg.m, None))
 def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
     """
     Spectra-radial phase representing on-axis Axiparabola
