@@ -281,6 +281,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
     peak_position_axis = np.ones(z_size)
     duration = np.ones(z_size)
     energy = np.zeros(z_size)
+    r_fwhm = np.zeros(z_size)
     w0 = np.zeros(z_size)
 
     for i, z in enumerate(tqdm(z_axis)):
@@ -305,7 +306,8 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
 
         a0[i] = analysis['a0']
         energy[i] = analysis['energy'].m_as('J')
-        w0[i] = (fwhm_radial(energy_flux[i], r_axis) / np.sqrt(2 * np.log(2))).m_as('um')
+        r_fwhm[i] = fwhm_radial(energy_flux[i], r_axis).m_as('um')
+        w0[i] = r_fwhm[i] / np.sqrt(2 * np.log(2))
 
     max_intensity = max_intensity * ureg['W/cm^2']
     intensity_axis = intensity_axis * ureg['W/cm^2']
@@ -315,6 +317,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
     duration_axis = duration_axis * ureg['fs']
     peak_position_axis = peak_position_axis * ureg['fs']
     energy = energy * ureg['J']
+    r_fwhm = r_fwhm * ureg['um']
     w0 = w0 * ureg['um']
 
     res = {
@@ -332,6 +335,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
         'duration': duration,
         'duration_axis': duration_axis,
         'peak_position_axis': peak_position_axis,
+        'r_fwhm': r_fwhm,
         'w0': w0,
     }
 
