@@ -210,7 +210,7 @@ def analyze_field(
     dt = t_axis[1] - t_axis[0]
 
     intensity = (c * eps0 * np.abs(E) ** 2 / 2).to('W/cm^2')
-    intensity_axis = intensity[0, :]
+    intensity_axis = intensity[:, 0]
 
     max_field = np.max(np.abs(E)).to('V/m')
     a0 = (e * max_field / m / c / omega0).m_as('')
@@ -236,7 +236,7 @@ def analyze_field(
         'omega0': omega0,
         'a0': a0,
         'intensity': intensity,
-        'intensity_on_axis': intensity_axis,
+        'intensity_axis': intensity_axis,
         'spectral_power': spectral_power,
         'k': k_axis,
         'power': power,
@@ -295,7 +295,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
         max_intensity_transverse[i] = np.max(analysis['intensity'], axis=0).m_as('W/cm^2')
 
         max_intensity[i] = np.max(analysis['intensity']).m_as('W/cm^2')
-        intensity_axis[i] = analysis['intensity'][:, 0].m_as('W/cm^2')
+        intensity_axis[i] = analysis['intensity_axis'].m_as('W/cm^2')
 
         energy_flux[i] = analysis['energy_flux'].m_as('J/cm^2')
         power[i] = analysis['power'].m_as('TW')
