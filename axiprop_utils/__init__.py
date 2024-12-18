@@ -216,7 +216,7 @@ def analyze_field(
     a0 = (e * max_field / m / c / omega0).m_as('')
 
     power = np.trapz(intensity * r_axis * 2 * np.pi, dx=dr).to('TW')
-    energy = np.trapz(power, dx=t_axis[1] - t_axis[0]).to('J')
+    energy = np.trapz(power, dx=dt).to('J')
     duration = fwhm(power, t_axis)
     on_axis_duration = fwhm(intensity[:, 0], t_axis)
     energy_flux = np.trapz(intensity, dx=dt, axis=0).to('J/cm^2')
