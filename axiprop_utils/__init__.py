@@ -508,7 +508,7 @@ def read_from_lasy(
 
 
 def create_gaussian_pulse(wavelength, energy, duration_fwhm, radius, *, t_axis, r_axis, transverse_order=2):
-    """Initializes a Gaussian pulse as a ScalarFieldEnvelope
+    """Initialize a Gaussian pulse as a ScalarFieldEnvelope.
 
     Parameters
     ----------
@@ -539,12 +539,8 @@ def create_gaussian_pulse(wavelength, energy, duration_fwhm, radius, *, t_axis, 
     tau = duration_fwhm / np.sqrt(2 * np.log(2))
 
     envelope = ScalarFieldEnvelope(*envelope_args)
-    envelope.make_gaussian_pulse(r_axis.m_as('m'), tau.m_as('s'), radius.m_as('m'), a0=1.0, n_ord=transverse_order)
-
-    energy_coeff = np.sqrt(energy.m_as('J') / envelope.Energy_ft)
-
-    envelope = ScalarFieldEnvelope(*envelope_args).import_field(
-        envelope.Field * energy_coeff, r_axis=envelope.r, transform=True
+    envelope.make_gaussian_pulse(
+        r_axis.m_as('m'), tau.m_as('s'), radius.m_as('m'), a0=1.0, n_ord=transverse_order, Energy=energy.m_as('J')
     )
     return envelope
 
