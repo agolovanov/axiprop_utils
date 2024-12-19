@@ -39,9 +39,9 @@ def test_analyze_field_gaussian_3d():
     np.testing.assert_allclose(stats['duration_global'].m_as('fs'), duration_fwhm.m_as('fs'), rtol=1e-3)
     np.testing.assert_allclose(stats['duration_on_axis'].m_as('fs'), duration_fwhm.m_as('fs'), rtol=1e-3)
 
-    fwhm_x = fwhm(stats['energy_flux_x'], stats['x'])
+    fwhm_x = fwhm(stats['fluence_x'], stats['x'])
     np.testing.assert_allclose(fwhm_x.m_as('m'), radius_x.m_as('m') * np.sqrt(2 * np.log(2)), rtol=1e-3)
-    fwhm_y = fwhm(stats['energy_flux_y'], stats['y'])
+    fwhm_y = fwhm(stats['fluence_y'], stats['y'])
     np.testing.assert_allclose(fwhm_y.m_as('m'), radius_y.m_as('m') * np.sqrt(2 * np.log(2)), rtol=1e-3)
 
     np.testing.assert_allclose(np.trapz(stats['power'], stats['t']).m_as('J'), energy.m_as('J'), rtol=1e-3)
@@ -88,8 +88,8 @@ def test_analyze_field_gaussian_2d_vs_3d():
         stats_2d['duration_on_axis'].m_as('fs'), stats_3d['duration_on_axis'].m_as('fs'), rtol=1e-3
     )
 
-    fwhm_2d = fwhm_radial(stats_2d['energy_flux'], stats_2d['r'])
-    fwhm_3d = fwhm(stats_3d['energy_flux_x'], stats_3d['x'])
+    fwhm_2d = fwhm_radial(stats_2d['fluence'], stats_2d['r'])
+    fwhm_3d = fwhm(stats_3d['fluence_x'], stats_3d['x'])
     np.testing.assert_allclose(fwhm_2d.m_as('m'), fwhm_3d.m_as('m'), rtol=1e-3)
     np.testing.assert_allclose(fwhm_2d.m_as('m'), radius.m_as('m') * np.sqrt(2 * np.log(2)), rtol=1e-3)
 

@@ -1,6 +1,6 @@
 [project]
 name = "axiprop_utils"
-version = "0.2.3"
+version = "0.3.0"
 description = "Helper functions for the Axiprop code"
 authors = [{ name = "Anton Golovanov" }]
 

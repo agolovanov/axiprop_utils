@@ -40,19 +40,11 @@ def create_gaussian_pulse(wavelength, energy, duration_fwhm, radius, *, t_axis, 
     return envelope
 
 
-def __is_sequence_size_2(arr):
-    return isinstance(arr, typing.Sequence) and len(arr) == 2
-
-
-def __ensure_tuple(arr):
-    if __is_sequence_size_2(arr):
-        return arr
-    return arr, arr
-
-
 def create_gaussian_pulse_3d(wavelength, energy, duration_fwhm, radius, *, t_axis, x_axis, y_axis, transverse_order=2):
-    radius_x, radius_y = __ensure_tuple(radius)
-    transverse_order_x, transverse_order_y = __ensure_tuple(transverse_order)
+    from axiprop_utils.utils import ensure_tuple
+
+    radius_x, radius_y = ensure_tuple(radius)
+    transverse_order_x, transverse_order_y = ensure_tuple(transverse_order)
 
     radius_x = radius_x.m_as('m')
     radius_y = radius_y.m_as('m')

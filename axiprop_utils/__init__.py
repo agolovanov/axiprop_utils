@@ -120,24 +120,30 @@ def plot_field(
     import matplotlib.pyplot as plt
     import mpl_utils
     from mpl_utils import remove_grid
+    from axiprop_utils.utils import ensure_tuple
 
     c = ureg['speed_of_light']
 
     if isinstance(field, ScalarFieldEnvelope):
         field = analyze_field(field)
 
-    scl = field['envelope']
-    E = scl.Field * ureg['V/m']
+    is_3d = field['3d']
+
     omega_axis = field['omega']
-    domega = omega_axis[1] - omega_axis[0]
-    E_ft = np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega
     t_axis = field['t']
     lambda_axis = field['lambda']
-    r_axis = field['r'].to(r_units)
+    if is_3d:
+        x_axis = field['x'].to(r_units)
+        y_axis = field['y'].to(r_units)
+    else:
+        r_axis = field['r'].to(r_units)
     omega0 = field['omega0']
     power = field['power']
 
-    fig, axes_grid = plt.subplots(figsize=(7, 4), ncols=3, nrows=2)
+    if is_3d:
+        fig, axes_grid = plt.subplots(figsize=(7, 6), ncols=3, nrows=3)
+    else:
+        fig, axes_grid = plt.subplots(figsize=(7, 4), ncols=3, nrows=2)
     axes_iter = iter(axes_grid.flatten())
 
     print(f'Peak field {field["max_field"]:.3g~}')
@@ -153,21 +159,49 @@ def plot_field(
         lambda_lim = (np.min(lambda_axis), np.max(lambda_axis))
 
     if r_lim is None:
-        r_lim = (np.min(r_axis), np.max(r_axis))
+        if is_3d:
+            x_lim = (np.min(x_axis), np.max(x_axis))
+            y_lim = (np.min(y_axis), np.max(y_axis))
+        else:
+            r_lim = (np.min(r_axis), np.max(r_axis))
     else:
-        r_lim = (np.min(r_axis), r_lim.to(r_units))
+        if is_3d:
+            xmax, ymax = ensure_tuple(r_lim.to(r_units))
+            x_lim = (-xmax, xmax)
+            y_lim = (-ymax, ymax)
+        else:
+            r_lim = (np.min(r_axis), r_lim.to(r_units))
 
     omega_lim = (2 * np.pi * c / lambda_lim[1], 2 * np.pi * c / lambda_lim[0])
-    omega_relative_lim = ((omega / omega0).m_as('') for omega in omega_lim)
+    omega_relative_lim = tuple((omega / omega0).m_as('') for omega in omega_lim)
 
-    ax = next(axes_iter)
-    extent = mpl_utils.calculate_extent(t_axis, r_axis)
-    ax.imshow(np.abs(E.T.magnitude), extent=extent, aspect='auto', origin='lower')
-    ax.set_xlabel(f'Duration, {t_axis.units}')
-    ax.set_ylabel(f'Radius, {r_axis.units}')
-    ax.set_xlim(t_lim)
-    ax.set_ylim(r_lim)
-    remove_grid(ax)
+    if is_3d:
+        ax = next(axes_iter)
+        extent = mpl_utils.calculate_extent(t_axis, x_axis)
+        ax.imshow(np.sqrt(field['intensity_x'].T.magnitude), extent=extent, aspect='auto', origin='lower')
+        ax.set_xlabel(f'Duration, {t_axis.units}')
+        ax.set_ylabel(f'$x$, {x_axis.units}')
+        ax.set_xlim(t_lim)
+        ax.set_ylim(x_lim)
+        remove_grid(ax)
+
+        ax = next(axes_iter)
+        extent = mpl_utils.calculate_extent(t_axis, y_axis)
+        ax.imshow(np.sqrt(field['intensity_y'].T.magnitude), extent=extent, aspect='auto', origin='lower')
+        ax.set_xlabel(f'Duration, {t_axis.units}')
+        ax.set_ylabel(f'$y$, {y_axis.units}')
+        ax.set_xlim(t_lim)
+        ax.set_ylim(y_lim)
+        remove_grid(ax)
+    else:
+        ax = next(axes_iter)
+        extent = mpl_utils.calculate_extent(t_axis, r_axis)
+        ax.imshow(np.sqrt(field['intensity'].T.magnitude), extent=extent, aspect='auto', origin='lower')
+        ax.set_xlabel(f'Duration, {t_axis.units}')
+        ax.set_ylabel(f'Radius, {r_axis.units}')
+        ax.set_xlim(t_lim)
+        ax.set_ylim(r_lim)
+        remove_grid(ax)
 
     ax = next(axes_iter)
     ax.plot(t_axis, power)
@@ -176,21 +210,65 @@ def plot_field(
     ax.set_xlim(t_lim)
     ax.set_ylim(ymin=0)
 
-    ax = next(axes_iter)
-    ax.plot(r_axis, field['energy_flux'].to('J/cm^2'))
-    ax.set_xlabel(f'Radius, {r_axis.units}')
-    ax.set_ylabel('Energy flux, J/cm$^2$')
-    ax.set_xlim(r_lim)
-    ax.set_ylim(ymin=0)
+    if is_3d:
+        ax = next(axes_iter)
+        extent = mpl_utils.calculate_extent(x_axis, y_axis)
+        ax.imshow(field['fluence'].magnitude, extent=extent, aspect='auto', origin='lower')
+        ax.set_xlabel(f'$x$, {x_axis.units}')
+        ax.set_ylabel(f'$y$, {y_axis.units}')
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        remove_grid(ax)
 
-    ax = next(axes_iter)
-    extent = mpl_utils.calculate_extent((omega_axis / omega0).m_as(''), r_axis)
-    ax.imshow(np.abs(E_ft.T.magnitude), extent=extent, aspect='auto', origin='lower')
-    ax.set_xlim(omega_relative_lim)
-    ax.set_ylim(r_lim)
-    ax.set_xlabel(r'$\omega/\omega_0$')
-    ax.set_ylabel(f'Radius, {r_axis.units}')
-    remove_grid(ax)
+        ax = next(axes_iter)
+        ax.plot(x_axis, field['fluence_x'].to('J/cm^2'))
+        ax.set_xlabel(f'$x$, {x_axis.units}')
+        ax.set_ylabel('Fluence, J/cm$^2$')
+        ax.set_xlim(x_lim)
+        ax.set_ylim(ymin=0)
+
+        ax = next(axes_iter)
+        ax.plot(y_axis, field['fluence_y'].to('J/cm^2'))
+        ax.set_xlabel(f'$y$, {y_axis.units}')
+        ax.set_ylabel('Fluence, J/cm$^2$')
+        ax.set_xlim(y_lim)
+        ax.set_ylim(ymin=0)
+    else:
+        ax = next(axes_iter)
+        ax.plot(r_axis, field['fluence'].to('J/cm^2'))
+        ax.set_xlabel(f'Radius, {r_axis.units}')
+        ax.set_ylabel('Fluence, J/cm$^2$')
+        ax.set_xlim(r_lim)
+        ax.set_ylim(ymin=0)
+
+    omega_rel = (omega_axis / omega0).m_as('')
+    if is_3d:
+        ax = next(axes_iter)
+        extent = mpl_utils.calculate_extent(omega_rel, x_axis)
+        ax.imshow(np.sqrt(field['spectral_intensity_x'].T.magnitude), extent=extent, aspect='auto', origin='lower')
+        ax.set_xlim(omega_relative_lim)
+        ax.set_ylim(x_lim)
+        ax.set_xlabel(r'$\omega/\omega_0$')
+        ax.set_ylabel(f'$x$, {x_axis.units}')
+        remove_grid(ax)
+
+        ax = next(axes_iter)
+        extent = mpl_utils.calculate_extent(omega_rel, y_axis)
+        ax.imshow(np.sqrt(field['spectral_intensity_y'].T.magnitude), extent=extent, aspect='auto', origin='lower')
+        ax.set_xlim(omega_relative_lim)
+        ax.set_ylim(y_lim)
+        ax.set_xlabel(r'$\omega/\omega_0$')
+        ax.set_ylabel(f'$y$, {y_axis.units}')
+        remove_grid(ax)
+    else:
+        ax = next(axes_iter)
+        extent = mpl_utils.calculate_extent(omega_rel, r_axis)
+        ax.imshow(np.sqrt(field['spectral_intensity'].T.magnitude), extent=extent, aspect='auto', origin='lower')
+        ax.set_xlim(omega_relative_lim)
+        ax.set_ylim(r_lim)
+        ax.set_xlabel(r'$\omega/\omega_0$')
+        ax.set_ylabel(f'Radius, {r_axis.units}')
+        remove_grid(ax)
 
     ax = next(axes_iter)
     ax.plot(lambda_axis[lambda_axis > 0], field['spectral_power_lambda'][lambda_axis > 0].to('mJ/nm'))
@@ -259,10 +337,10 @@ def analyze_field(
     energy = np.trapz(power, dx=dt).to('J')
     duration = fwhm(power, t_axis)
     on_axis_duration = fwhm(intensity_axis, t_axis)
-    energy_flux = np.trapz(intensity, dx=dt, axis=0).to('J/cm^2')
+    fluence = np.trapz(intensity, dx=dt, axis=0).to('J/cm^2')
     if is_3d:
-        energy_flux_x = energy_flux[:, iy_center]
-        energy_flux_y = energy_flux[ix_center, :]
+        fluence_x = fluence[:, iy_center]
+        fluence_y = fluence[ix_center, :]
 
     del E
 
@@ -271,11 +349,15 @@ def analyze_field(
     lambda_axis = (2 * np.pi / k_axis).to('nm')
     domega = omega_axis[1] - omega_axis[0]
 
-    intensity_ft = np.pi * c * eps0 * np.abs(np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega) ** 2
+    spectral_intensity = (
+        np.pi * c * eps0 * np.abs(np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega) ** 2
+    ).to('J s / cm^2')
     if is_3d:
-        spectral_power = np.trapz(np.trapz(intensity_ft, dx=dy, axis=2), dx=dx, axis=1).to('J s')
+        spectral_intensity_x = spectral_intensity[:, :, iy_center]
+        spectral_intensity_y = spectral_intensity[:, ix_center, :]
+        spectral_power = np.trapz(np.trapz(spectral_intensity, dx=dy, axis=2), dx=dx, axis=1).to('J s')
     else:
-        spectral_power = 2 * np.pi * np.trapz(intensity_ft * r_axis, dx=dr).to('J s')
+        spectral_power = 2 * np.pi * np.trapz(spectral_intensity * r_axis, dx=dr).to('J s')
     spectral_power_lambda = (spectral_power * 2 * np.pi * c / lambda_axis**2).to('mJ/nm')
 
     output = {
@@ -291,7 +373,7 @@ def analyze_field(
         'lambda': lambda_axis,
         'omega': omega_axis,
         'spectral_power_lambda': spectral_power_lambda,
-        'energy_flux': energy_flux,
+        'fluence': fluence,
         'energy': energy,
         'max_field': max_field,
         'duration_global': duration,
@@ -303,12 +385,15 @@ def analyze_field(
         output['y'] = y_axis
         output['intensity_x'] = intensity_x
         output['intensity_y'] = intensity_y
-        output['energy_flux_x'] = energy_flux_x
-        output['energy_flux_y'] = energy_flux_y
+        output['spectral_intensity_x'] = spectral_intensity_x
+        output['spectral_intensity_y'] = spectral_intensity_y
+        output['fluence_x'] = fluence_x
+        output['fluence_y'] = fluence_y
         output['3d'] = True
     else:
         output['r'] = r_axis
         output['intensity'] = intensity
+        output['spectral_intensity'] = spectral_intensity
         output['3d'] = False
 
     if plot_field:
@@ -335,7 +420,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
     max_intensity = np.ones(z_size)
     max_intensity_transverse = np.ones((z_size, r_size))
     a0 = np.zeros(z_size)
-    energy_flux = np.ones((z_size, r_size))
+    fluence = np.ones((z_size, r_size))
     power = np.ones((z_size, t_size))
     duration_axis = np.ones(z_size)
     peak_position_axis = np.ones(z_size)
@@ -356,7 +441,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
         max_intensity[i] = np.max(analysis['intensity']).m_as('W/cm^2')
         intensity_axis[i] = analysis['intensity_axis'].m_as('W/cm^2')
 
-        energy_flux[i] = analysis['energy_flux'].m_as('J/cm^2')
+        fluence[i] = analysis['fluence'].m_as('J/cm^2')
         power[i] = analysis['power'].m_as('TW')
 
         duration[i] = fwhm(power[i], t_axis).m_as('fs')
@@ -366,12 +451,12 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
 
         a0[i] = analysis['a0']
         energy[i] = analysis['energy'].m_as('J')
-        r_fwhm[i] = fwhm_radial(energy_flux[i], r_axis).m_as('um')
+        r_fwhm[i] = fwhm_radial(fluence[i], r_axis).m_as('um')
         w0[i] = r_fwhm[i] / np.sqrt(2 * np.log(2))
 
     max_intensity = max_intensity * ureg['W/cm^2']
     intensity_axis = intensity_axis * ureg['W/cm^2']
-    energy_flux = energy_flux * ureg['J/cm^2']
+    fluence = fluence * ureg['J/cm^2']
     power = power * ureg['TW']
     duration = duration * ureg['fs']
     duration_axis = duration_axis * ureg['fs']
@@ -389,7 +474,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
         'a0': a0,
         'max_intensity': max_intensity,
         'intensity_axis': intensity_axis,
-        'energy_flux': energy_flux,
+        'fluence': fluence,
         'power': power,
         'energy': energy,
         'duration': duration,

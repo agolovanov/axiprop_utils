@@ -31,7 +31,7 @@ def test_analyze_field_gaussian():
     np.testing.assert_allclose(stats['duration_global'].m_as('fs'), duration_fwhm.m_as('fs'), rtol=1e-3)
     np.testing.assert_allclose(stats['duration_on_axis'].m_as('fs'), duration_fwhm.m_as('fs'), rtol=1e-3)
 
-    fwhm = fwhm_radial(stats['energy_flux'], stats['r'])
+    fwhm = fwhm_radial(stats['fluence'], stats['r'])
     np.testing.assert_allclose(fwhm.m_as('m'), radius.m_as('m') * np.sqrt(2 * np.log(2)), rtol=1e-3)
 
     np.testing.assert_allclose(np.trapz(stats['power'], stats['t']).m_as('J'), energy.m_as('J'), rtol=1e-3)
