@@ -1,7 +1,8 @@
 import pint
 import numpy as np
 
-from axiprop_utils import create_gaussian_pulse, analyze_field
+from axiprop_utils import analyze_field
+from axiprop_utils.pulse import create_gaussian_pulse
 
 ureg = pint.get_application_registry()
 

@@ -5,6 +5,8 @@ import numpy as np
 import pint
 from axiprop.containers import ScalarFieldEnvelope
 
+from .pulse import create_gaussian_pulse
+
 if typing.TYPE_CHECKING:
     from typing import Any, Tuple
 
@@ -562,44 +564,6 @@ def read_from_lasy(
         scl.time_to_frequency()
 
     return scl
-
-
-def create_gaussian_pulse(wavelength, energy, duration_fwhm, radius, *, t_axis, r_axis, transverse_order=2):
-    """Initialize a Gaussian pulse as a ScalarFieldEnvelope.
-
-    Parameters
-    ----------
-    wavelength : pint.Quantity
-        central wavelength of the pulse
-    energy : pint.Quantity
-        the total energy in the pulse
-    duration_fwhm : pint.Quantity
-        the FWHM duration
-    radius : pint.Quantity
-        the radius of the distribution
-    t_axis : pint.Quantity (array)
-        array of times
-    r_axis : pint.Quantity (array)
-        array of r coordinates
-    transverse_order : int, optional
-        the number N in exp(-(r/R)^N) transverse profile, default 0.
-
-
-    Returns
-    -------
-    axiprop.containers.ScalarFieldEnvelope
-        The envelope containing the Gaussian pulse
-    """
-    k0 = 2 * np.pi / wavelength
-    envelope_args = (k0.m_as('1/m'), t_axis.m_as('s'), 4)
-
-    tau = duration_fwhm / np.sqrt(2 * np.log(2))
-
-    envelope = ScalarFieldEnvelope(*envelope_args)
-    envelope.make_gaussian_pulse(
-        r_axis.m_as('m'), tau.m_as('s'), radius.m_as('m'), a0=1.0, n_ord=transverse_order, Energy=energy.m_as('J')
-    )
-    return envelope
 
 
 def add_pulse_front_curvature(envelope: ScalarFieldEnvelope, pfc):
