@@ -30,6 +30,25 @@ def hole(r, r_hole):
     return mirror_mask
 
 
+def is_envelope_3d(scl: ScalarFieldEnvelope) -> bool:
+    """Check if the envelope is 3D (2D in the transverse direction).
+
+    Parameters
+    ----------
+    scl : ScalarFieldEnvelope
+        the envelope.
+
+    Returns
+    -------
+    bool
+        True if the envelope is 3D, False otherwise.
+    """
+    if len(scl.Field.shape) == 3:
+        return True
+    else:
+        return False
+
+
 @ureg.wraps(None, (ureg.m**-1, ureg.m, ureg.m, ureg.m, ureg.m, None))
 def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
     """
@@ -192,6 +211,8 @@ def analyze_field(
 ):
     from pic_utils.functions import fwhm
 
+    is_3d = is_envelope_3d(scl)
+
     if not plot_field and plot_kwargs:
         raise ValueError(f'Additional parameters supplied: {plot_kwargs.keys()}, but plot_field is False')
 
@@ -203,31 +224,56 @@ def analyze_field(
     E = scl.Field * ureg['V/m']
 
     t_axis = (scl.t * ureg.s).to('fs')
-    r_axis = (scl.r * ureg.m).to(r_units)
+
     k0 = scl.k0 * ureg['1/m']
     omega0 = scl.omega0 * ureg['1/s']
-    dr = r_axis[1] - r_axis[0]
+    if is_3d:
+        x_axis = (scl.x * ureg.m).to(r_units)
+        y_axis = (scl.y * ureg.m).to(r_units)
+        dx = x_axis[1] - x_axis[0]
+        dy = y_axis[1] - y_axis[0]
+        ix_center = len(x_axis) // 2
+        iy_center = len(y_axis) // 2
+    else:
+        r_axis = (scl.r * ureg.m).to(r_units)
+        dr = r_axis[1] - r_axis[0]
     dt = t_axis[1] - t_axis[0]
 
     intensity = (c * eps0 * np.abs(E) ** 2 / 2).to('W/cm^2')
-    intensity_axis = intensity[:, 0]
+    if is_3d:
+        intensity_x = intensity[:, :, iy_center]
+        intensity_y = intensity[:, ix_center, :]
+        intensity_axis = intensity_x[:, ix_center]
+    else:
+        intensity_axis = intensity[:, 0]
 
     max_field = np.max(np.abs(E)).to('V/m')
     a0 = (e * max_field / m / c / omega0).m_as('')
 
-    power = np.trapz(intensity * r_axis * 2 * np.pi, dx=dr).to('TW')
+    if is_3d:
+        power = np.trapz(np.trapz(intensity, dx=dy, axis=2), dx=dx, axis=1).to('TW')
+    else:
+        power = np.trapz(intensity * r_axis * 2 * np.pi, dx=dr).to('TW')
     energy = np.trapz(power, dx=dt).to('J')
     duration = fwhm(power, t_axis)
-    on_axis_duration = fwhm(intensity[:, 0], t_axis)
+    on_axis_duration = fwhm(intensity_axis, t_axis)
     energy_flux = np.trapz(intensity, dx=dt, axis=0).to('J/cm^2')
+    if is_3d:
+        energy_flux_x = energy_flux[:, iy_center]
+        energy_flux_y = energy_flux[ix_center, :]
+
+    del E
 
     k_axis = np.fft.ifftshift(scl.k_freq) / ureg.m
     omega_axis = (c * k_axis).to('1/s')
     lambda_axis = (2 * np.pi / k_axis).to('nm')
     domega = omega_axis[1] - omega_axis[0]
 
-    E_ft = np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega
-    spectral_power = (2 * np.pi * c * eps0 * np.trapz(np.abs(E_ft) ** 2 * r_axis * np.pi, dx=dr)).to('J s')
+    intensity_ft = np.pi * c * eps0 * np.abs(np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega) ** 2
+    if is_3d:
+        spectral_power = np.trapz(np.trapz(intensity_ft, dx=dy, axis=2), dx=dx, axis=1).to('J s')
+    else:
+        spectral_power = 2 * np.pi * np.trapz(intensity_ft * r_axis, dx=dr).to('J s')
     spectral_power_lambda = (spectral_power * 2 * np.pi * c / lambda_axis**2).to('mJ/nm')
 
     output = {
@@ -235,7 +281,6 @@ def analyze_field(
         'k0': k0,
         'omega0': omega0,
         'a0': a0,
-        'intensity': intensity,
         'intensity_axis': intensity_axis,
         'spectral_power': spectral_power,
         'k': k_axis,
@@ -244,13 +289,25 @@ def analyze_field(
         'lambda': lambda_axis,
         'omega': omega_axis,
         'spectral_power_lambda': spectral_power_lambda,
-        'r': r_axis,
         'energy_flux': energy_flux,
         'energy': energy,
         'max_field': max_field,
         'duration_global': duration,
         'duration_on_axis': on_axis_duration,
     }
+
+    if is_3d:
+        output['x'] = x_axis
+        output['y'] = y_axis
+        output['intensity_x'] = intensity_x
+        output['intensity_y'] = intensity_y
+        output['energy_flux_x'] = energy_flux_x
+        output['energy_flux_y'] = energy_flux_y
+        output['3d'] = True
+    else:
+        output['r'] = r_axis
+        output['intensity'] = intensity
+        output['3d'] = False
 
     if plot_field:
         plot_field_func = globals()['plot_field']  # hack around shadowing by the local parameter
