@@ -94,6 +94,7 @@ def plot_field(
     t_lim: 'Tuple[pint.Quantity, pint.Quantity] | None' = None,
     r_lim: pint.Quantity | None = None,
     figtitle: str | None = None,
+    return_figure: bool = False,
 ) -> 'Tuple[matplotlib.figure.Figure, Any]':
     """Plot the scalar field envelope.
 
@@ -111,11 +112,13 @@ def plot_field(
         upper limit for the r axis, by default None
     figtitle : str, optional
         the title of the figure, by default None
+    return_figure : bool, optional
+        whether to return the figure and axes, by default False
 
     Returns
     -------
-    Tuple[matplotlib.figure.Figure, Any]
-        figure and axes created by matplotlib for further customization
+    Tuple[matplotlib.figure.Figure, Any] or None
+        figure and axes created by matplotlib for further customization (if return_figure is True)
     """
     import matplotlib.pyplot as plt
     import mpl_utils
@@ -279,7 +282,8 @@ def plot_field(
 
     fig.suptitle(figtitle)
 
-    return fig, axes_grid
+    if return_figure:
+        return fig, axes_grid
 
 
 def analyze_field(
@@ -398,7 +402,7 @@ def analyze_field(
 
     if plot_field:
         plot_field_func = globals()['plot_field']  # hack around shadowing by the local parameter
-        fig, axes = plot_field_func(output, **plot_kwargs)
+        fig, axes = plot_field_func(output, return_figure=True, **plot_kwargs)
         output['figure'] = fig
         output['axes'] = axes
 
