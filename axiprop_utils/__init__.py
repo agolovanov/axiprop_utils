@@ -32,12 +32,12 @@ def hole(r, r_hole):
     return mirror_mask
 
 
-def is_envelope_3d(scl: ScalarFieldEnvelope) -> bool:
+def is_envelope_3d(envelope: ScalarFieldEnvelope) -> bool:
     """Check if the envelope is 3D (2D in the transverse direction).
 
     Parameters
     ----------
-    scl : ScalarFieldEnvelope
+    envelope : ScalarFieldEnvelope
         the envelope.
 
     Returns
@@ -45,7 +45,7 @@ def is_envelope_3d(scl: ScalarFieldEnvelope) -> bool:
     bool
         True if the envelope is 3D, False otherwise.
     """
-    if len(scl.Field.shape) == 3:
+    if len(envelope.Field.shape) == 3:
         return True
     else:
         return False
