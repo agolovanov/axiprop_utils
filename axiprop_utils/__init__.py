@@ -691,3 +691,39 @@ def propagate_envelope(
     new_envelope = ScalarFieldEnvelope(envelope.k0, envelope.t, envelope.n_dump)
     new_envelope.import_field_ft(E_propagated, t_loc=t_loc, r_axis=propagator.r_new, transform=True)
     return new_envelope
+
+
+def calculate_fluence_radius(envelope: ScalarFieldEnvelope | dict, threshold: float) -> pint.Quantity:
+    """Calculate the radius at which the fluence drops below a certain threshold.
+
+    Only works for 2D envelopes.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope | dict
+        The envelope or the result of `analyze_field` run on it.
+    threshold : float
+        The threshold for the fluence.
+
+    Returns
+    -------
+    pint.Quantity
+        The radius at which the fluence drops below the threshold.
+
+    Raises
+    ------
+    NotImplementedError
+        If the envelope is 3D.
+    """
+    if isinstance(envelope, ScalarFieldEnvelope):
+        envelope = analyze_field(envelope)
+
+    if envelope['3d']:
+        raise NotImplementedError('Fluence radius can only be calculated for 2D envelopes')
+
+    r = envelope['r']
+    fluence = envelope['fluence']
+
+    max_fluence = np.max(fluence)
+
+    return r[::-1][np.argmax(fluence[::-1] > threshold * max_fluence)]
