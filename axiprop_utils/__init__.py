@@ -12,7 +12,8 @@ if typing.TYPE_CHECKING:
 
     import matplotlib
     import matplotlib.figure
-    from axiprop.lib import PropagatorResampling, PropagatorSymmetric
+    from axiprop.lib import PropagatorResampling, PropagatorSymmetric, PropagatorFFT2, PropagatorFFT2Fresnel
+    from axiprop.steppers import StepperNonParaxial
 
 ureg = pint.get_application_registry()
 
@@ -508,9 +509,34 @@ def create_resampling_propagator(
     return PropagatorResampling(r_axis=envelope.r, kz_axis=envelope.k_freq, r_axis_new=(R_new.m_as('m'), Nr_new))
 
 
-def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
-    ureg = z_axis._REGISTRY
+def create_propagator_3d(envelope: ScalarFieldEnvelope) -> 'PropagatorFFT2':
+    from axiprop.lib import PropagatorFFT2
 
+    if not is_envelope_3d(envelope):
+        raise ValueError('A 3D propagator can only be created based on a 3D envelope')
+
+    x_axis_def = (np.ptp(envelope.x), envelope.x.size)
+    y_axis_def = (np.ptp(envelope.y), envelope.y.size)
+
+    return PropagatorFFT2(x_axis_def, y_axis_def, envelope.k_freq)
+
+
+def create_propagator_3d_fresnel(
+    envelope: ScalarFieldEnvelope,
+    N_pad=None,
+) -> 'PropagatorFFT2Fresnel':
+    from axiprop.lib import PropagatorFFT2Fresnel
+
+    if not is_envelope_3d(envelope):
+        raise ValueError('A 3D propagator can only be created based on a 3D envelope')
+
+    x_axis_def = (np.ptp(envelope.x), envelope.x.size)
+    y_axis_def = (np.ptp(envelope.y), envelope.y.size)
+
+    return PropagatorFFT2Fresnel(x_axis_def, y_axis_def, envelope.k_freq, N_pad=N_pad)
+
+
+def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
     if prop is None:
         prop = create_symmetric_propagator(envelope)
 
@@ -522,7 +548,6 @@ def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
 
 
 def envelope_from_time_series(time_series: dict, iteration):
-    ureg = time_series['z']._REGISTRY
     c = ureg['speed_of_light']
 
     k0 = time_series['k0'].m_as('1/m')
@@ -550,8 +575,14 @@ def apply_spectral_multiplier(envelope: ScalarFieldEnvelope, multiplier: np.ndar
     ScalarFieldEnvelope
         The new envelope with the applied multiplier
     """
+    is_3d = is_envelope_3d(envelope)
+    if is_3d:
+        r_axis = (envelope.r, envelope.x, envelope.y)
+    else:
+        r_axis = envelope.r
+
     envelope_new = ScalarFieldEnvelope(k0=envelope.k0, t_axis=envelope.t, n_dump=envelope.n_dump)
-    envelope_new.import_field_ft(envelope.Field_ft * multiplier, r_axis=envelope.r, transform=True)
+    envelope_new.import_field_ft(envelope.Field_ft * multiplier, r_axis=r_axis, transform=True)
     return envelope_new
 
 
@@ -665,7 +696,7 @@ def add_pulse_front_curvature(envelope: ScalarFieldEnvelope, pfc):
 
 
 def propagate_envelope(
-    envelope: ScalarFieldEnvelope, distance: pint.Quantity, propagator: 'PropagatorResampling'
+    envelope: ScalarFieldEnvelope, distance: pint.Quantity, propagator: 'StepperNonParaxial'
 ) -> ScalarFieldEnvelope:
     """Propagate an envelope to a specific coordinate.
 
@@ -675,7 +706,7 @@ def propagate_envelope(
         Envelope to be propagated
     distance : pint.Quantity
         Propagation distance
-    propagator : PropagatorResampling
+    propagator : StepperNonParaxial
         The propagator
 
     Returns
@@ -683,13 +714,26 @@ def propagate_envelope(
     ScalarFieldEnvelope
         Envelope after the propagation.
     """
+    from axiprop.lib import PropagatorResampling, PropagatorFFT2Fresnel
+
     c = ureg['speed_of_light']
+
+    is_3d = is_envelope_3d(envelope)
 
     t_loc = envelope.t.min() + (distance / c).m_as('s')
     E_propagated = propagator.step(envelope.Field_ft, distance.m_as('m'))
 
+    if isinstance(propagator, PropagatorResampling):
+        r_axis = propagator.r_new
+    elif isinstance(propagator, PropagatorFFT2Fresnel):
+        r_axis = (propagator.r, propagator.r_new[0], propagator.r_new[1])
+    elif hasattr(propagator, 'x'):
+        r_axis = (propagator.r, propagator.x, propagator.y)
+    else:
+        r_axis = propagator.r
+
     new_envelope = ScalarFieldEnvelope(envelope.k0, envelope.t, envelope.n_dump)
-    new_envelope.import_field_ft(E_propagated, t_loc=t_loc, r_axis=propagator.r_new, transform=True)
+    new_envelope.import_field_ft(E_propagated, t_loc=t_loc, r_axis=r_axis, transform=True)
     return new_envelope
 
 
