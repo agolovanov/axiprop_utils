@@ -348,13 +348,13 @@ def analyze_field(
 
     del E
 
-    k_axis = np.fft.ifftshift(scl.k_freq) / ureg.m
+    k_axis = np.fft.fftshift(scl.k_freq) / ureg.m
     omega_axis = (c * k_axis).to('1/s')
     lambda_axis = (2 * np.pi / k_axis).to('nm')
     domega = omega_axis[1] - omega_axis[0]
 
     spectral_intensity = (
-        np.pi * c * eps0 * np.abs(np.fft.ifftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega) ** 2
+        np.pi * c * eps0 * np.abs(np.fft.fftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega) ** 2
     ).to('J s / cm^2')
     if is_3d:
         spectral_intensity_x = spectral_intensity[:, :, iy_center]
