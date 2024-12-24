@@ -12,8 +12,8 @@ if typing.TYPE_CHECKING:
 
     import matplotlib
     import matplotlib.figure
-    from axiprop.lib import PropagatorResampling, PropagatorSymmetric, PropagatorFFT2, PropagatorFFT2Fresnel
-    from axiprop.steppers import StepperNonParaxial
+    from axiprop.lib import PropagatorFFT2, PropagatorFFT2Fresnel, PropagatorResampling, PropagatorSymmetric
+    from axiprop.steppers import StepperFresnel, StepperNonParaxial
 
 ureg = pint.get_application_registry()
 
@@ -124,6 +124,7 @@ def plot_field(
     import matplotlib.pyplot as plt
     import mpl_utils
     from mpl_utils import remove_grid
+
     from axiprop_utils.utils import ensure_tuple
 
     c = ureg['speed_of_light']
@@ -155,6 +156,11 @@ def plot_field(
     print(f'Peak power {np.max(power):.3g~}')
     print(f'Energy {field["energy"]:.3g~}')
     print(f'Duration {field["duration_global"]:.3g~} (global), {field["duration_on_axis"]:.3g~} (on-axis)')
+    if is_3d:
+        print(f'x size: {field["x_fwhm"]:.3g~} (FWHM), {field["w0_x"]:.3g~} (1/e^2 spot size equivalent)')
+        print(f'y size: {field["y_fwhm"]:.3g~} (FWHM), {field["w0_y"]:.3g~} (1/e^2 spot size equivalent)')
+    else:
+        print(f'Transverse size: {field["r_fwhm"]:.3g~} (FWHM), {field["w0"]:.3g~} (1/e^2 spot size equivalent)')
 
     if t_lim is None:
         t_lim = np.min(t_axis), np.max(t_axis)
@@ -294,7 +300,7 @@ def analyze_field(
     plot_field=False,
     **plot_kwargs,
 ):
-    from pic_utils.functions import fwhm
+    from pic_utils.functions import fwhm, fwhm_radial
 
     is_3d = is_envelope_3d(scl)
 
@@ -331,6 +337,7 @@ def analyze_field(
         intensity_axis = intensity_x[:, ix_center]
     else:
         intensity_axis = intensity[:, 0]
+    max_intensity = np.max(intensity)
 
     max_field = np.max(np.abs(E)).to('V/m')
     a0 = (e * max_field / m / c / omega0).m_as('')
@@ -365,11 +372,21 @@ def analyze_field(
         spectral_power = 2 * np.pi * np.trapz(spectral_intensity * r_axis, dx=dr).to('J s')
     spectral_power_lambda = (spectral_power * 2 * np.pi * c / lambda_axis**2).to('mJ/nm')
 
+    if is_3d:
+        x_fwhm = fwhm(fluence_x, x_axis)
+        y_fwhm = fwhm(fluence_y, y_axis)
+        w0_x = x_fwhm / np.sqrt(2 * np.log(2))
+        w0_y = y_fwhm / np.sqrt(2 * np.log(2))
+    else:
+        r_fwhm = fwhm_radial(fluence, r_axis)
+        w0 = r_fwhm / np.sqrt(2 * np.log(2))
+
     output = {
         'envelope': scl,
         'k0': k0,
         'omega0': omega0,
         'a0': a0,
+        'max_intensity': max_intensity,
         'intensity_axis': intensity_axis,
         'spectral_power': spectral_power,
         'k': k_axis,
@@ -395,11 +412,17 @@ def analyze_field(
         output['fluence_x'] = fluence_x
         output['fluence_y'] = fluence_y
         output['3d'] = True
+        output['x_fwhm'] = x_fwhm
+        output['y_fwhm'] = y_fwhm
+        output['w0_x'] = w0_x
+        output['w0_y'] = w0_y
     else:
         output['r'] = r_axis
         output['intensity'] = intensity
         output['spectral_intensity'] = spectral_intensity
         output['3d'] = False
+        output['r_fwhm'] = r_fwhm
+        output['w0'] = w0
 
     if plot_field:
         plot_field_func = globals()['plot_field']  # hack around shadowing by the local parameter
@@ -410,43 +433,57 @@ def analyze_field(
     return output
 
 
-def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
+def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
     from pic_utils.functions import fwhm, fwhm_radial
     from tqdm.auto import tqdm
 
-    ureg = z_axis._REGISTRY
+    from axiprop_utils.utils import generate_r_axis
+
     c = ureg['speed_of_light']
 
     z_size = len(z_axis)
     t_size = len(t_axis)
-    r_size = len(r_axis)
+
+    if is_3d:
+        x_axis, y_axis = r_axis
+        x_size = len(x_axis)
+        y_size = len(y_axis)
+        r_axis_import = generate_r_axis(x_axis, y_axis)
+    else:
+        r_size = len(r_axis)
+        r_axis_import = r_axis.m_as('m')
 
     intensity_axis = np.ones((z_size, t_size))
     max_intensity = np.ones(z_size)
-    max_intensity_transverse = np.ones((z_size, r_size))
     a0 = np.zeros(z_size)
-    fluence = np.ones((z_size, r_size))
     power = np.ones((z_size, t_size))
     duration_axis = np.ones(z_size)
     peak_position_axis = np.ones(z_size)
     duration = np.ones(z_size)
     energy = np.zeros(z_size)
-    r_fwhm = np.zeros(z_size)
-    w0 = np.zeros(z_size)
+
+    if is_3d:
+        fluence_x = np.ones((z_size, x_size))
+        fluence_y = np.ones((z_size, y_size))
+        x_fwhm = np.zeros(z_size)
+        y_fwhm = np.zeros(z_size)
+        w0_x = np.zeros(z_size)
+        w0_y = np.zeros(z_size)
+    else:
+        fluence = np.ones((z_size, r_size))
+        r_fwhm = np.zeros(z_size)
+        w0 = np.zeros(z_size)
 
     for i, z in enumerate(tqdm(z_axis)):
         t_loc = (t_axis.min() + z_axis[i] / c).to('s').magnitude
 
         sclDiag = ScalarFieldEnvelope(k0=k0, t_axis=t_axis.m_as('s'), n_dump=4)
-        sclDiag.import_field_ft(field_array[i], t_loc=t_loc, r_axis=r_axis.m_as('m'), transform=True)
+        sclDiag.import_field_ft(field_array[i], t_loc=t_loc, r_axis=r_axis_import, transform=True)
         analysis = analyze_field(sclDiag)
 
-        max_intensity_transverse[i] = np.max(analysis['intensity'], axis=0).m_as('W/cm^2')
-
-        max_intensity[i] = np.max(analysis['intensity']).m_as('W/cm^2')
+        max_intensity[i] = analysis['max_intensity'].m_as('W/cm^2')
         intensity_axis[i] = analysis['intensity_axis'].m_as('W/cm^2')
 
-        fluence[i] = analysis['fluence'].m_as('J/cm^2')
         power[i] = analysis['power'].m_as('TW')
 
         duration[i] = fwhm(power[i], t_axis).m_as('fs')
@@ -456,38 +493,68 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0):
 
         a0[i] = analysis['a0']
         energy[i] = analysis['energy'].m_as('J')
-        r_fwhm[i] = fwhm_radial(fluence[i], r_axis).m_as('um')
-        w0[i] = r_fwhm[i] / np.sqrt(2 * np.log(2))
+
+        if is_3d:
+            fluence_x[i] = analysis['fluence_x'].m_as('J/cm^2')
+            fluence_y[i] = analysis['fluence_y'].m_as('J/cm^2')
+            x_fwhm[i] = analysis['x_fwhm'].m_as('um')
+            y_fwhm[i] = analysis['y_fwhm'].m_as('um')
+            w0_x[i] = analysis['w0_x'].m_as('um')
+            w0_y[i] = analysis['w0_y'].m_as('um')
+        else:
+            fluence[i] = analysis['fluence'].m_as('J/cm^2')
+            r_fwhm[i] = analysis['r_fwhm'].m_as('um')
+            w0[i] = analysis['w0'].m_as('um')
 
     max_intensity = max_intensity * ureg['W/cm^2']
     intensity_axis = intensity_axis * ureg['W/cm^2']
-    fluence = fluence * ureg['J/cm^2']
     power = power * ureg['TW']
     duration = duration * ureg['fs']
     duration_axis = duration_axis * ureg['fs']
     peak_position_axis = peak_position_axis * ureg['fs']
     energy = energy * ureg['J']
-    r_fwhm = r_fwhm * ureg['um']
-    w0 = w0 * ureg['um']
+
+    if is_3d:
+        fluence_x = fluence_x * ureg['J/cm^2']
+        fluence_y = fluence_y * ureg['J/cm^2']
+        x_fwhm = x_fwhm * ureg['um']
+        y_fwhm = y_fwhm * ureg['um']
+        w0_x = w0_x * ureg['um']
+        w0_y = w0_y * ureg['um']
+    else:
+        fluence = fluence * ureg['J/cm^2']
+        r_fwhm = r_fwhm * ureg['um']
+        w0 = w0 * ureg['um']
 
     res = {
         'z': z_axis,
-        'r': r_axis,
         't': t_axis,
         'k0': k0 / ureg.m,
         'field': field_array,
         'a0': a0,
         'max_intensity': max_intensity,
         'intensity_axis': intensity_axis,
-        'fluence': fluence,
         'power': power,
         'energy': energy,
         'duration': duration,
         'duration_axis': duration_axis,
         'peak_position_axis': peak_position_axis,
-        'r_fwhm': r_fwhm,
-        'w0': w0,
     }
+
+    if is_3d:
+        res['x'] = x_axis
+        res['y'] = y_axis
+        res['fluence_x'] = fluence_x
+        res['fluence_y'] = fluence_y
+        res['x_fwhm'] = x_fwhm
+        res['y_fwhm'] = y_fwhm
+        res['w0_x'] = w0_x
+        res['w0_y'] = w0_y
+    else:
+        res['r'] = r_axis
+        res['fluence'] = fluence
+        res['r_fwhm'] = r_fwhm
+        res['w0'] = w0
 
     res['omega0'] = (res['k0'] * c).to('1/s')
     res['lambda0'] = (2 * np.pi / res['k0']).to('um')
@@ -523,7 +590,7 @@ def create_propagator_3d(envelope: ScalarFieldEnvelope) -> 'PropagatorFFT2':
 
 def create_propagator_3d_fresnel(
     envelope: ScalarFieldEnvelope,
-    N_pad=None,
+    **prop_kwargs,
 ) -> 'PropagatorFFT2Fresnel':
     from axiprop.lib import PropagatorFFT2Fresnel
 
@@ -533,18 +600,77 @@ def create_propagator_3d_fresnel(
     x_axis_def = (np.ptp(envelope.x), envelope.x.size)
     y_axis_def = (np.ptp(envelope.y), envelope.y.size)
 
-    return PropagatorFFT2Fresnel(x_axis_def, y_axis_def, envelope.k_freq, N_pad=N_pad)
+    return PropagatorFFT2Fresnel(x_axis_def, y_axis_def, envelope.k_freq, **prop_kwargs)
+
+
+def create_default_propagator(envelope: ScalarFieldEnvelope) -> 'PropagatorSymmetric | PropagatorFFT2Fresnel':
+    """Create a default propagator for the envelope.
+
+    For 3D envelopes, a PropagatorFFT2Fresnel is created.
+    For 2D envelopes, a PropagatorSymmetric is created.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        the envelope
+
+    Returns
+    -------
+    PropagatorSymmetric | PropagatorFFT2Fresnel
+        the propagator
+    """
+    if is_envelope_3d(envelope):
+        return create_propagator_3d_fresnel(envelope)
+    else:
+        return create_symmetric_propagator(envelope)
+
+
+def get_propagator_r_axis(
+    propagator: 'StepperNonParaxial | StepperFresnel',
+) -> 'np.ndarray | Tuple[np.ndarray, np.ndarray, np.ndarray]':
+    """Get the r axis of the propagator, as required by ScalarFieldEnvelope import.
+
+    For 3D propagators, the r axis is a tuple of r, x and y axes.
+
+    Parameters
+    ----------
+    propagator : StepperNonParaxial | StepperFresnel
+        the propagator
+
+    Returns
+    -------
+    np.ndarray | Tuple[np.ndarray, np.ndarray, np.ndarray]
+        the r axis
+    """
+    from axiprop.lib import PropagatorFFT2Fresnel, PropagatorResampling
+
+    from axiprop_utils.utils import generate_r_axis
+
+    if isinstance(propagator, PropagatorResampling):
+        return propagator.r_new
+    elif isinstance(propagator, PropagatorFFT2Fresnel):
+        return generate_r_axis(*propagator.r_new)
+    elif hasattr(propagator, 'x'):
+        return (propagator.r, propagator.x, propagator.y)
+    else:
+        return propagator.r
 
 
 def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
+    is_3d = is_envelope_3d(envelope)
+
     if prop is None:
-        prop = create_symmetric_propagator(envelope)
+        prop = create_default_propagator(envelope)
 
     field_propagated = prop.steps(envelope.Field_ft, z_axis=z_axis.m_as('m'))
     t_axis = envelope.t * ureg.s
-    r_axis = prop.r_new * ureg.m
+    r_axis = get_propagator_r_axis(prop)
+    if isinstance(r_axis, tuple):
+        r_axis = (r_axis[1] * ureg.m, r_axis[2] * ureg.m)
+    else:
+        r_axis = r_axis * ureg.m
 
-    return analyze_time_series(field_propagated, z_axis, t_axis, r_axis, envelope.k0)
+    return analyze_time_series(field_propagated, z_axis, t_axis, r_axis, envelope.k0, is_3d=is_3d)
 
 
 def envelope_from_time_series(time_series: dict, iteration):
@@ -714,23 +840,12 @@ def propagate_envelope(
     ScalarFieldEnvelope
         Envelope after the propagation.
     """
-    from axiprop.lib import PropagatorResampling, PropagatorFFT2Fresnel
-
     c = ureg['speed_of_light']
-
-    is_3d = is_envelope_3d(envelope)
 
     t_loc = envelope.t.min() + (distance / c).m_as('s')
     E_propagated = propagator.step(envelope.Field_ft, distance.m_as('m'))
 
-    if isinstance(propagator, PropagatorResampling):
-        r_axis = propagator.r_new
-    elif isinstance(propagator, PropagatorFFT2Fresnel):
-        r_axis = (propagator.r, propagator.r_new[0], propagator.r_new[1])
-    elif hasattr(propagator, 'x'):
-        r_axis = (propagator.r, propagator.x, propagator.y)
-    else:
-        r_axis = propagator.r
+    r_axis = get_propagator_r_axis(propagator)
 
     new_envelope = ScalarFieldEnvelope(envelope.k0, envelope.t, envelope.n_dump)
     new_envelope.import_field_ft(E_propagated, t_loc=t_loc, r_axis=r_axis, transform=True)

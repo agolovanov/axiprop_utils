@@ -41,7 +41,7 @@ def create_gaussian_pulse(wavelength, energy, duration_fwhm, radius, *, t_axis, 
 
 
 def create_gaussian_pulse_3d(wavelength, energy, duration_fwhm, radius, *, t_axis, x_axis, y_axis, transverse_order=2):
-    from axiprop_utils.utils import ensure_tuple
+    from axiprop_utils.utils import ensure_tuple, generate_r_axis
 
     radius_x, radius_y = ensure_tuple(radius)
     transverse_order_x, transverse_order_y = ensure_tuple(transverse_order)
@@ -51,8 +51,6 @@ def create_gaussian_pulse_3d(wavelength, energy, duration_fwhm, radius, *, t_axi
     t_axis = t_axis.m_as('s')
     x_axis = x_axis.m_as('m')
     y_axis = y_axis.m_as('m')
-
-    r_axis = np.sqrt(x_axis[:, None] ** 2 + y_axis[None, :] ** 2)
 
     k0 = 2 * np.pi / wavelength.m_as('m')
     tau = duration_fwhm.m_as('s') / np.sqrt(2 * np.log(2))
@@ -64,7 +62,7 @@ def create_gaussian_pulse_3d(wavelength, energy, duration_fwhm, radius, *, t_axi
     field = t_profile[:, None, None] * x_profile[None, :, None] * y_profile[None, None, :]
 
     envelope = ScalarFieldEnvelope(k0, t_axis, 4)
-    envelope.import_field(field, r_axis=(r_axis, x_axis, y_axis), make_copy=True)
+    envelope.import_field(field, r_axis=generate_r_axis(x_axis, y_axis), make_copy=True)
 
     energy_scaling = np.sqrt(energy.m_as('J') / envelope.Energy)
     envelope.Field *= energy_scaling
