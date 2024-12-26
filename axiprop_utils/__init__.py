@@ -312,8 +312,6 @@ def analyze_field(
     e = ureg['elementary_charge']
     m = ureg['electron_mass']
 
-    E = scl.Field * ureg['V/m']
-
     t_axis = (scl.t * ureg.s).to('fs')
 
     k0 = scl.k0 * ureg['1/m']
@@ -329,6 +327,14 @@ def analyze_field(
         r_axis = (scl.r * ureg.m).to(r_units)
         dr = r_axis[1] - r_axis[0]
     dt = t_axis[1] - t_axis[0]
+
+    E = scl.Field * ureg['V/m']
+
+    if is_3d:
+        phase_x = np.angle(E.magnitude[:, :, iy_center])
+        phase_y = np.angle(E.magnitude[:, ix_center, :])
+    else:
+        phase = np.angle(E.magnitude)
 
     intensity = (c * eps0 * np.abs(E) ** 2 / 2).to('W/cm^2')
     if is_3d:
@@ -361,9 +367,15 @@ def analyze_field(
     lambda_axis = (2 * np.pi / k_axis).to('nm')
     domega = omega_axis[1] - omega_axis[0]
 
-    spectral_intensity = (
-        np.pi * c * eps0 * np.abs(np.fft.fftshift(scl.Field_ft, axes=0) * ureg['V/m'] / domega) ** 2
-    ).to('J s / cm^2')
+    E_ft = np.fft.fftshift(scl.Field_ft, axes=0)
+
+    if is_3d:
+        spectral_phase_x = np.angle(E_ft[:, :, iy_center])
+        spectral_phase_y = np.angle(E_ft[:, ix_center, :])
+    else:
+        spectral_phase = np.angle(E_ft)
+
+    spectral_intensity = (np.pi * c * eps0 * np.abs(E_ft * ureg['V/m'] / domega) ** 2).to('J s / cm^2')
     if is_3d:
         spectral_intensity_x = spectral_intensity[:, :, iy_center]
         spectral_intensity_y = spectral_intensity[:, ix_center, :]
@@ -416,6 +428,10 @@ def analyze_field(
         output['y_fwhm'] = y_fwhm
         output['w0_x'] = w0_x
         output['w0_y'] = w0_y
+        output['phase_x'] = phase_x
+        output['phase_y'] = phase_y
+        output['spectral_phase_x'] = spectral_phase_x
+        output['spectral_phase_y'] = spectral_phase_y
     else:
         output['r'] = r_axis
         output['intensity'] = intensity
@@ -423,6 +439,8 @@ def analyze_field(
         output['3d'] = False
         output['r_fwhm'] = r_fwhm
         output['w0'] = w0
+        output['phase'] = phase
+        output['spectral_phase'] = spectral_phase
 
     if plot_field:
         plot_field_func = globals()['plot_field']  # hack around shadowing by the local parameter
