@@ -6,6 +6,7 @@ import pint
 from axiprop.containers import ScalarFieldEnvelope
 
 from .pulse import create_gaussian_pulse
+from .axiparabola import mirror_axiparabola
 
 if typing.TYPE_CHECKING:
     from typing import Any, Tuple
@@ -50,41 +51,6 @@ def is_envelope_3d(envelope: ScalarFieldEnvelope) -> bool:
         return True
     else:
         return False
-
-
-@ureg.wraps(None, (ureg.m**-1, ureg.m, ureg.m, ureg.m, ureg.m, None))
-def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
-    """
-    Spectra-radial phase representing on-axis Axiparabola
-    [Smartsev et al Opt. Lett. 44, 3414 (2019)]
-    """
-    from scipy.integrate import solve_ivp
-
-    s_ax = np.zeros_like(r)
-    r_loc = r[N_cut:]
-
-    def sag_equation(r, s):
-        return (s - (f0 + d0 * r**2 / R**2) + np.sqrt(r**2 + ((f0 + d0 * r**2 / R**2) - s) ** 2)) / r
-
-    s_ax[N_cut:] = solve_ivp(
-        sag_equation,
-        (r_loc[0], r_loc[-1]),
-        [
-            r_loc[0] / (4 * f0),
-        ],
-        t_eval=r_loc,
-        method='DOP853',
-        rtol=1e-13,
-        atol=1e-16,
-    ).y.flatten()
-
-    s_ax[:N_cut] = s_ax[N_cut]
-    s_ax -= s_ax[0]
-
-    kz2d = (kz * np.ones((*kz.shape, *r.shape)).T).T
-    phi = -2 * s_ax[None, :] * kz2d
-
-    return np.exp(1j * phi)
 
 
 def plot_field(
