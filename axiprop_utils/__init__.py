@@ -315,13 +315,13 @@ def analyze_field(
     a0 = (e * max_field / m / c / omega0).m_as('')
 
     if is_3d:
-        power = np.trapz(np.trapz(intensity, dx=dy, axis=2), dx=dx, axis=1).to('TW')
+        power = np.trapezoid(np.trapezoid(intensity, dx=dy, axis=2), dx=dx, axis=1).to('TW')
     else:
-        power = np.trapz(intensity * r_axis * 2 * np.pi, dx=dr).to('TW')
-    energy = np.trapz(power, dx=dt).to('J')
+        power = np.trapezoid(intensity * r_axis * 2 * np.pi, dx=dr).to('TW')
+    energy = np.trapezoid(power, dx=dt).to('J')
     duration = fwhm(power, t_axis)
     on_axis_duration = fwhm(intensity_axis, t_axis)
-    fluence = np.trapz(intensity, dx=dt, axis=0).to('J/cm^2')
+    fluence = np.trapezoid(intensity, dx=dt, axis=0).to('J/cm^2')
     if is_3d:
         fluence_x = fluence[:, iy_center]
         fluence_y = fluence[ix_center, :]
@@ -345,9 +345,9 @@ def analyze_field(
     if is_3d:
         spectral_intensity_x = spectral_intensity[:, :, iy_center]
         spectral_intensity_y = spectral_intensity[:, ix_center, :]
-        spectral_power = np.trapz(np.trapz(spectral_intensity, dx=dy, axis=2), dx=dx, axis=1).to('J s')
+        spectral_power = np.trapezoid(np.trapezoid(spectral_intensity, dx=dy, axis=2), dx=dx, axis=1).to('J s')
     else:
-        spectral_power = 2 * np.pi * np.trapz(spectral_intensity * r_axis, dx=dr).to('J s')
+        spectral_power = 2 * np.pi * np.trapezoid(spectral_intensity * r_axis, dx=dr).to('J s')
     spectral_power_lambda = (spectral_power * 2 * np.pi * c / lambda_axis**2).to('mJ/nm')
 
     if is_3d:
