@@ -410,7 +410,7 @@ def analyze_field(
 
     if plot_field:
         plot_field_func = globals()['plot_field']  # hack around shadowing by the local parameter
-        fig, axes = plot_field_func(output, return_figure=True, **plot_kwargs)
+        fig, axes = plot_field_func(output, r_units=r_units, return_figure=True, **plot_kwargs)
         output['figure'] = fig
         output['axes'] = axes
 
