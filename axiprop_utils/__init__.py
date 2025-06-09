@@ -461,7 +461,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
     for i, z in enumerate(tqdm(z_axis)):
         t_loc = (t_axis.min() + z_axis[i] / c).to('s').magnitude
 
-        sclDiag = ScalarFieldEnvelope(k0=k0, t_axis=t_axis.m_as('s'), n_dump=4)
+        sclDiag = ScalarFieldEnvelope(k0=k0, t_axis=t_axis.m_as('s'), n_dump_r=4, n_dump_t=4)
         sclDiag.import_field_ft(field_array[i], t_loc=t_loc, r_axis=r_axis_import, transform=True)
         analysis = analyze_field(sclDiag)
 
@@ -665,7 +665,7 @@ def envelope_from_time_series(time_series: dict, iteration):
     r_axis = time_series['r'].m_as('m')
     t_axis = time_series['t'].m_as('s')
 
-    scl = ScalarFieldEnvelope(k0=k0, t_axis=t_axis, n_dump=4)
+    scl = ScalarFieldEnvelope(k0=k0, t_axis=t_axis, n_dump_r=4, n_dump_t=4)
     scl.import_field_ft(time_series['field'][iteration], t_loc=t_loc, r_axis=r_axis, transform=True)
     return scl
 
@@ -691,7 +691,9 @@ def apply_spectral_multiplier(envelope: ScalarFieldEnvelope, multiplier: np.ndar
     else:
         r_axis = envelope.r
 
-    envelope_new = ScalarFieldEnvelope(k0=envelope.k0, t_axis=envelope.t, n_dump=envelope.n_dump)
+    envelope_new = ScalarFieldEnvelope(
+        k0=envelope.k0, t_axis=envelope.t, n_dump_r=envelope.n_dump_r, n_dump_t=envelope.n_dump_t
+    )
     envelope_new.import_field_ft(envelope.Field_ft * multiplier, r_axis=r_axis, transform=True)
     return envelope_new
 
@@ -785,7 +787,7 @@ def read_from_lasy(
     t_axis = np.linspace(t_min_lasy, t_min_lasy + dt * (nt - 1), nt)
     r_axis = np.linspace(0, dr * (nr - 1), nr)
 
-    scl = ScalarFieldEnvelope(omega / speed_of_light, t_axis, n_dump)
+    scl = ScalarFieldEnvelope(omega / speed_of_light, t_axis, n_dump_r=n_dump, n_dump_t=n_dump)
 
     if attenuate_boundaries:
         scl.import_field(env, r_axis=r_axis)
@@ -800,9 +802,9 @@ def add_pulse_front_curvature(envelope: ScalarFieldEnvelope, pfc):
     pfc_phase = np.exp(1j * pfc.m_as('s/m^2') * envelope.r**2 * (envelope.omega - envelope.omega0)[:, np.newaxis])
     field = envelope.Field_ft * pfc_phase
 
-    return ScalarFieldEnvelope(envelope.k0, envelope.t, envelope.n_dump).import_field_ft(
-        field, r_axis=envelope.r, transform=True
-    )
+    return ScalarFieldEnvelope(
+        envelope.k0, envelope.t, n_dump_r=envelope.n_dump_r, n_dump_t=envelope.n_dump_t
+    ).import_field_ft(field, r_axis=envelope.r, transform=True)
 
 
 def propagate_envelope(
@@ -831,7 +833,7 @@ def propagate_envelope(
 
     r_axis = get_propagator_r_axis(propagator)
 
-    new_envelope = ScalarFieldEnvelope(envelope.k0, envelope.t, envelope.n_dump)
+    new_envelope = ScalarFieldEnvelope(envelope.k0, envelope.t, n_dump_r=envelope.n_dump_r, n_dump_t=envelope.n_dump_t)
     new_envelope.import_field_ft(E_propagated, t_loc=t_loc, r_axis=r_axis, transform=True)
     return new_envelope
 
