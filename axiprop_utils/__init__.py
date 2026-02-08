@@ -439,6 +439,10 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
 
     intensity_axis = np.ones((z_size, t_size))
     max_intensity = np.ones(z_size)
+
+    if not is_3d:
+        max_intensity_transverse = np.ones((z_size, r_size))  # TODO implement for 3D case
+
     a0 = np.zeros(z_size)
     power = np.ones((z_size, t_size))
     duration_axis = np.ones(z_size)
@@ -489,6 +493,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
             fluence[i] = analysis['fluence'].m_as('J/cm^2')
             r_fwhm[i] = analysis['r_fwhm'].m_as('um')
             w0[i] = analysis['w0'].m_as('um')
+            max_intensity_transverse[i] = np.max(analysis['intensity'], axis=0).m_as('W/cm^2')
 
     max_intensity = max_intensity * ureg['W/cm^2']
     intensity_axis = intensity_axis * ureg['W/cm^2']
@@ -509,6 +514,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
         fluence = fluence * ureg['J/cm^2']
         r_fwhm = r_fwhm * ureg['um']
         w0 = w0 * ureg['um']
+        max_intensity_transverse = max_intensity_transverse * ureg['W/cm^2']
 
     res = {
         'z': z_axis,
@@ -539,6 +545,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
         res['fluence'] = fluence
         res['r_fwhm'] = r_fwhm
         res['w0'] = w0
+        res['max_intensity_transverse'] = max_intensity_transverse
 
     res['omega0'] = (res['k0'] * c).to('1/s')
     res['lambda0'] = (2 * np.pi / res['k0']).to('um')
