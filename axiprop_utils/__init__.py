@@ -447,6 +447,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
     power = np.ones((z_size, t_size))
     duration_axis = np.ones(z_size)
     peak_position_axis = np.ones(z_size)
+    centroid_position_axis = np.ones(z_size)
     duration = np.ones(z_size)
     energy = np.zeros(z_size)
 
@@ -478,6 +479,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
         duration_axis[i] = fwhm(intensity_axis[i], t_axis).m_as('fs')
 
         peak_position_axis[i] = t_axis[np.argmax(intensity_axis[i])].m_as('fs')
+        centroid_position_axis[i] = (np.sum(intensity_axis[i] * t_axis) / np.sum(intensity_axis[i])).m_as('fs')
 
         a0[i] = analysis['a0']
         energy[i] = analysis['energy'].m_as('J')
@@ -501,6 +503,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
     duration = duration * ureg['fs']
     duration_axis = duration_axis * ureg['fs']
     peak_position_axis = peak_position_axis * ureg['fs']
+    centroid_position_axis = centroid_position_axis * ureg['fs']
     energy = energy * ureg['J']
 
     if is_3d:
@@ -529,6 +532,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
         'duration': duration,
         'duration_axis': duration_axis,
         'peak_position_axis': peak_position_axis,
+        'centroid_position_axis': centroid_position_axis,
     }
 
     if is_3d:
