@@ -461,7 +461,7 @@ def analyze_field(
     return output
 
 
-def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
+def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False, show_progress=True):
     from pic_utils.functions import fwhm, fwhm_radial
     from tqdm.auto import tqdm
 
@@ -507,7 +507,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
         r_fwhm = np.zeros(z_size)
         w0 = np.zeros(z_size)
 
-    for i, z in enumerate(tqdm(z_axis)):
+    for i, z in enumerate(tqdm(z_axis, disable=not show_progress)):
         t_loc = (t_axis.min() + z_axis[i] / c).to('s').magnitude
 
         sclDiag = ScalarFieldEnvelope(k0=k0, t_axis=t_axis.m_as('s'), n_dump_r=4, n_dump_t=4)
@@ -695,13 +695,13 @@ def get_propagator_r_axis(
         return propagator.r
 
 
-def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
+def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None, *, show_progress=True):
     is_3d = is_envelope_3d(envelope)
 
     if prop is None:
         prop = create_default_propagator(envelope)
 
-    field_propagated = prop.steps(envelope.Field_ft, z_axis=z_axis.m_as('m'))
+    field_propagated = prop.steps(envelope.Field_ft, z_axis=z_axis.m_as('m'), show_progress=show_progress)
     t_axis = envelope.t * ureg.s
     r_axis = get_propagator_r_axis(prop)
     if isinstance(r_axis, tuple):
@@ -709,7 +709,7 @@ def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
     else:
         r_axis = r_axis * ureg.m
 
-    return analyze_time_series(field_propagated, z_axis, t_axis, r_axis, envelope.k0, is_3d=is_3d)
+    return analyze_time_series(field_propagated, z_axis, t_axis, r_axis, envelope.k0, is_3d=is_3d, show_progress=show_progress)
 
 
 def envelope_from_time_series(time_series: dict, iteration):
