@@ -27,11 +27,55 @@ def mirror_parabolic(kz, r, f0):
     return np.exp(1j * phi)
 
 
-def hole(r, r_hole):
-    mirror_mask = np.ones(r.shape)
-    mirror_mask[r < r_hole] = 0.0
+def hole(r, r_hole, *, l_smooth=None, order_smooth=2):
+    """Introduces a hole with optional smooth boundaries.
 
-    return mirror_mask
+    Parameters
+    ----------
+    r : np.ndarray
+        The radial coordinate.
+    r_hole : float
+        The radius of the hole.
+    l_smooth : float, optional
+        The characteristic width of the smooth transition, by default None (which corresponds to a hard hole).
+    order_smooth : int, optional
+        The order of the smooth supergaussian transition, by default 2
+
+    Returns
+    -------
+    np.ndarray
+        The suppression mask.
+    """
+    mirror_modulation = np.ones(r.shape)
+    hole_mask = r < r_hole
+
+    if l_smooth is not None:
+        mirror_modulation[hole_mask] = np.exp(- ((r[hole_mask] - r_hole) / l_smooth) ** order_smooth)
+    else:
+        mirror_modulation[hole_mask] = 0.0
+
+    return mirror_modulation
+
+
+def hole_supergaussian(r, r_hole, order: int):
+    """Introduces a supergaussian-shaped suppression at the axis.
+    The formula is 1 - exp(-(r/r_hole)^order).
+
+    Parameters
+    ----------
+    r : np.ndarray
+        The radial coordinate.
+    r_hole : float
+        The radius of the hole.
+    order : int
+        The order of the supergaussian.
+
+    Returns
+    -------
+    np.ndarray
+        The suppression mask.
+    """
+    return 1.0 - np.exp(-((r / r_hole) ** (order)))
 
 
 def is_envelope_3d(envelope: ScalarFieldEnvelope) -> bool:
