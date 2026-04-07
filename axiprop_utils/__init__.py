@@ -137,7 +137,7 @@ def plot_field(
 
     from axiprop_utils.utils import ensure_tuple
 
-    c = ureg['speed_of_light']
+    c = ureg('speed_of_light')
 
     if isinstance(field, ScalarFieldEnvelope):
         field = analyze_field(field)
@@ -317,15 +317,15 @@ def analyze_field(
     if not plot_field and plot_kwargs:
         raise ValueError(f'Additional parameters supplied: {plot_kwargs.keys()}, but plot_field is False')
 
-    c = ureg['speed_of_light']
-    eps0 = ureg['vacuum_permittivity']
-    e = ureg['elementary_charge']
-    m = ureg['electron_mass']
+    c = ureg('speed_of_light')
+    eps0 = ureg('vacuum_permittivity')
+    e = ureg('elementary_charge')
+    m = ureg('electron_mass')
 
     t_axis = (scl.t * ureg.s).to('fs')
 
-    k0 = scl.k0 * ureg['1/m']
-    omega0 = scl.omega0 * ureg['1/s']
+    k0 = scl.k0 * ureg('1/m')
+    omega0 = scl.omega0 * ureg('1/s')
     if is_3d:
         x_axis = (scl.x * ureg.m).to(r_units)
         y_axis = (scl.y * ureg.m).to(r_units)
@@ -338,7 +338,7 @@ def analyze_field(
         dr = r_axis[1] - r_axis[0]
     dt = t_axis[1] - t_axis[0]
 
-    E = scl.Field * ureg['V/m']
+    E = scl.Field * ureg('V/m')
 
     if is_3d:
         phase_x = np.angle(E.magnitude[:, :, iy_center])
@@ -385,7 +385,7 @@ def analyze_field(
     else:
         spectral_phase = np.angle(E_ft)
 
-    spectral_intensity = (np.pi * c * eps0 * np.abs(E_ft * ureg['V/m'] / domega) ** 2).to('J s / cm^2')
+    spectral_intensity = (np.pi * c * eps0 * np.abs(E_ft * ureg('V/m') / domega) ** 2).to('J s / cm^2')
     if is_3d:
         spectral_intensity_x = spectral_intensity[:, :, iy_center]
         spectral_intensity_y = spectral_intensity[:, ix_center, :]
@@ -467,7 +467,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
 
     from axiprop_utils.utils import generate_r_axis
 
-    c = ureg['speed_of_light']
+    c = ureg('speed_of_light')
 
     z_size = len(z_axis)
     t_size = len(t_axis)
@@ -541,27 +541,27 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False):
             w0[i] = analysis['w0'].m_as('um')
             max_intensity_transverse[i] = np.max(analysis['intensity'], axis=0).m_as('W/cm^2')
 
-    max_intensity = max_intensity * ureg['W/cm^2']
-    intensity_axis = intensity_axis * ureg['W/cm^2']
-    power = power * ureg['TW']
-    duration = duration * ureg['fs']
-    duration_axis = duration_axis * ureg['fs']
-    peak_position_axis = peak_position_axis * ureg['fs']
-    centroid_position_axis = centroid_position_axis * ureg['fs']
-    energy = energy * ureg['J']
+    max_intensity = max_intensity * ureg('W/cm^2')
+    intensity_axis = intensity_axis * ureg('W/cm^2')
+    power = power * ureg('TW')
+    duration = duration * ureg('fs')
+    duration_axis = duration_axis * ureg('fs')
+    peak_position_axis = peak_position_axis * ureg('fs')
+    centroid_position_axis = centroid_position_axis * ureg('fs')
+    energy = energy * ureg('J')
 
     if is_3d:
-        fluence_x = fluence_x * ureg['J/cm^2']
-        fluence_y = fluence_y * ureg['J/cm^2']
-        x_fwhm = x_fwhm * ureg['um']
-        y_fwhm = y_fwhm * ureg['um']
-        w0_x = w0_x * ureg['um']
-        w0_y = w0_y * ureg['um']
+        fluence_x = fluence_x * ureg('J/cm^2')
+        fluence_y = fluence_y * ureg('J/cm^2')
+        x_fwhm = x_fwhm * ureg('um')
+        y_fwhm = y_fwhm * ureg('um')
+        w0_x = w0_x * ureg('um')
+        w0_y = w0_y * ureg('um')
     else:
-        fluence = fluence * ureg['J/cm^2']
-        r_fwhm = r_fwhm * ureg['um']
-        w0 = w0 * ureg['um']
-        max_intensity_transverse = max_intensity_transverse * ureg['W/cm^2']
+        fluence = fluence * ureg('J/cm^2')
+        r_fwhm = r_fwhm * ureg('um')
+        w0 = w0 * ureg('um')
+        max_intensity_transverse = max_intensity_transverse * ureg('W/cm^2')
 
     res = {
         'z': z_axis,
@@ -713,7 +713,7 @@ def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None):
 
 
 def envelope_from_time_series(time_series: dict, iteration):
-    c = ureg['speed_of_light']
+    c = ureg('speed_of_light')
 
     k0 = time_series['k0'].m_as('1/m')
     t_loc = (time_series['t'].min() + time_series['z'][iteration] / c).m_as('s')
@@ -881,7 +881,7 @@ def propagate_envelope(
     ScalarFieldEnvelope
         Envelope after the propagation.
     """
-    c = ureg['speed_of_light']
+    c = ureg('speed_of_light')
 
     t_loc = envelope.t.min() + (distance / c).m_as('s')
     E_propagated = propagator.step(envelope.Field_ft, distance.m_as('m'))

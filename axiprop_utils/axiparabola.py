@@ -73,7 +73,7 @@ def add_constant_velocity_phase(
     """
     from . import apply_spectral_multiplier
 
-    c = ureg['speed_of_light']
+    c = ureg('speed_of_light')
 
     r = envelope.r * ureg.m
     tau_delay = (d0 / R**2 * (-dv * r**2 + 1 / (2 * f0**2) * (dv + 0.5) * r**4) / c).m_as('s')
