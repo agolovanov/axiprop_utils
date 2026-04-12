@@ -563,6 +563,8 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False, sh
         w0 = w0 * ureg('um')
         max_intensity_transverse = max_intensity_transverse * ureg('W/cm^2')
 
+    dv_centroid = np.gradient((c * centroid_position_axis).m_as('m'), z_axis.m_as('m'))
+
     res = {
         'z': z_axis,
         't': t_axis,
@@ -577,6 +579,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False, sh
         'duration_axis': duration_axis,
         'peak_position_axis': peak_position_axis,
         'centroid_position_axis': centroid_position_axis,
+        'dv_centroid': dv_centroid,
     }
 
     if is_3d:
