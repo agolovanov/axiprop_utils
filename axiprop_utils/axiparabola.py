@@ -15,10 +15,31 @@ if typing.TYPE_CHECKING:
 
 @ureg.wraps(None, (ureg.m**-1, ureg.m, ureg.m, ureg.m, ureg.m, None))
 def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
-    """
-    Spectra-radial phase representing on-axis Axiparabola
+    """Calculates the phase term for a mirror with an axiparabolic shape.
+
     [Smartsev et al Opt. Lett. 44, 3414 (2019)]
+
+    Parameters
+    ----------
+    kz : pint.Quantity of shape (N_kz,)
+        the longitudinal wavevector axis
+    r : pint.Quantity of shape (N_r,)
+        the radial coordinate
+    f0 : pint.Quantity
+        the focal length of the axiparabola
+    d0 : pint.Quantity
+        the focal depth of the axiparabola
+    R : pint.Quantity
+        the radius of the axiparabola
+    N_cut : int, optional
+        the number of points to cut from the beginning of the radial axis, by default 4
+
+    Returns
+    -------
+    np.ndarray of shape (N_kz, N_r)
+        the phase term representing the reflection on the axiparabola
     """
+    from . import mirror_reflection
     from scipy.integrate import solve_ivp
 
     s_ax = np.zeros_like(r)
@@ -42,11 +63,7 @@ def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
     s_ax[:N_cut] = s_ax[N_cut]
     s_ax -= s_ax[0]
 
-    kz2d = (kz * np.ones((*kz.shape, *r.shape)).T).T
-    phi = -2 * s_ax[None, :] * kz2d
-
-    return np.exp(1j * phi)
-
+    return mirror_reflection(kz, s_ax)
 
 def add_constant_velocity_phase(
     envelope: 'ScalarFieldEnvelope', dv: float, *, f0: 'Quantity', d0: 'Quantity', R: 'Quantity'

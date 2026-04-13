@@ -18,13 +18,35 @@ if typing.TYPE_CHECKING:
 
 ureg = pint.get_application_registry()
 
+def mirror_reflection(kz, s):
+    """Calculates a phase term from the reflection on a mirror with sag s for a given spectrum represented by the longitudinal wavevector kz.
+
+    The formula is exp(-2i * s * kz), which corresponds to the phase acquired by a wave reflecting on a mirror with sag s.
+    The factor of 2 accounts for the round trip of the wave to the mirror and back.
+    
+    Parameters
+    ----------
+    kz : np.ndarray of shape (N_kz,)
+        the longitudinal wavevector axis
+    s : np.ndarray of shape (N_s,)
+        the sag of the mirror as a function of radius
+
+    Returns
+    -------
+    np.ndarray of shape (N_kz, N_s)
+        the phase term representing the reflection on the mirror
+    
+    """
+    
+    kz2d = (kz * np.ones((*kz.shape, *s.shape)).T).T
+    phi = -2 * s[None, :] * kz2d
+    if isinstance(phi, pint.Quantity):
+        phi = phi.m_as('')
+    return np.exp(1j * phi)
+
 
 def mirror_parabolic(kz, r, f0):
-    kz2d = (kz * np.ones((*kz.shape, *r.shape)).T).T
-
-    phi = -(0.5 * kz2d * r**2 / f0).m_as('')
-
-    return np.exp(1j * phi)
+    return mirror_reflection(kz, r**2 / (4 * f0))
 
 
 def hole(r, r_hole, *, l_smooth=None, order_smooth=2):
