@@ -18,12 +18,13 @@ if typing.TYPE_CHECKING:
 
 ureg = pint.get_application_registry()
 
+
 def mirror_reflection(kz, s):
     """Calculates a phase term from the reflection on a mirror with sag s for a given spectrum represented by the longitudinal wavevector kz.
 
     The formula is exp(-2i * s * kz), which corresponds to the phase acquired by a wave reflecting on a mirror with sag s.
     The factor of 2 accounts for the round trip of the wave to the mirror and back.
-    
+
     Parameters
     ----------
     kz : np.ndarray of shape (N_kz,)
@@ -35,9 +36,9 @@ def mirror_reflection(kz, s):
     -------
     np.ndarray of shape (N_kz, N_s)
         the phase term representing the reflection on the mirror
-    
+
     """
-    
+
     kz2d = (kz * np.ones((*kz.shape, *s.shape)).T).T
     phi = -2 * s[None, :] * kz2d
     if isinstance(phi, pint.Quantity):
@@ -72,7 +73,7 @@ def hole(r, r_hole, *, l_smooth=None, order_smooth=2):
     hole_mask = r < r_hole
 
     if l_smooth is not None:
-        mirror_modulation[hole_mask] = np.exp(- ((r[hole_mask] - r_hole) / l_smooth) ** order_smooth)
+        mirror_modulation[hole_mask] = np.exp(-(((r[hole_mask] - r_hole) / l_smooth) ** order_smooth))
     else:
         mirror_modulation[hole_mask] = 0.0
 
@@ -734,7 +735,9 @@ def calculate_time_series(envelope: ScalarFieldEnvelope, z_axis, prop=None, *, s
     else:
         r_axis = r_axis * ureg.m
 
-    return analyze_time_series(field_propagated, z_axis, t_axis, r_axis, envelope.k0, is_3d=is_3d, show_progress=show_progress)
+    return analyze_time_series(
+        field_propagated, z_axis, t_axis, r_axis, envelope.k0, is_3d=is_3d, show_progress=show_progress
+    )
 
 
 def envelope_from_time_series(time_series: dict, iteration):
@@ -969,10 +972,30 @@ def apply_radial_delay(envelope: ScalarFieldEnvelope, tau_delay: np.array | pint
     ScalarFieldEnvelope
         the pulse with the added radial delay
     """
-
-    
     if isinstance(tau_delay, pint.Quantity):
         tau_delay = tau_delay.m_as('s')
-    
+
     spectral_phase = np.exp(1j * (envelope.omega[:, np.newaxis] - envelope.omega0) * tau_delay)
+    return apply_spectral_multiplier(envelope, spectral_phase)
+
+
+def apply_radial_GDD(envelope: ScalarFieldEnvelope, radial_GDD: np.array | pint.Quantity) -> ScalarFieldEnvelope:
+    """Add a radial GDD to the pulse.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        the pulse to be modified
+    radial_GDD : np.array | pint.Quantity
+        the radial GDD as a function of radius. Should have the same shape as the envelope.r axis.
+
+    Returns
+    -------
+    ScalarFieldEnvelope
+        the pulse with the added radial GDD
+    """
+    if isinstance(radial_GDD, pint.Quantity):
+        radial_GDD = radial_GDD.m_as('s^2')
+
+    spectral_phase = np.exp(0.5j * (envelope.omega[:, np.newaxis] - envelope.omega0) ** 2 * radial_GDD)
     return apply_spectral_multiplier(envelope, spectral_phase)

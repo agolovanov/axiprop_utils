@@ -65,8 +65,15 @@ def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
 
     return mirror_reflection(kz, s_ax)
 
+
 def add_constant_velocity_phase(
-    envelope: 'ScalarFieldEnvelope', dv: float, *, f0: 'Quantity', d0: 'Quantity', R: 'Quantity'
+    envelope: 'ScalarFieldEnvelope',
+    dv: float,
+    *,
+    f0: 'Quantity',
+    d0: 'Quantity',
+    R: 'Quantity',
+    compensate_elongation: bool = False,
 ) -> 'ScalarFieldEnvelope':
     """Add a phase term to the envelope representing a constant velocity along the optical axis for an axiparabola.
 
@@ -82,17 +89,33 @@ def add_constant_velocity_phase(
         The focal depth of the axiparabola
     R : pint.Quantity
         The radius of the axiparabola
+    compensate_elongation : bool, optional
+        Whether to compensate for the elongation of the pulse due to the delay term by adding a GDD term, by default False
 
     Returns
     -------
     ScalarFieldEnvelope
         The envelope with the added phase term
     """
-    from . import apply_radial_delay
+    from . import apply_radial_delay, apply_radial_GDD
 
     c = ureg('speed_of_light')
 
     r = envelope.r * ureg.m
-    tau_delay = d0 / R**2 * (-dv * r**2 + 1 / (2 * f0**2) * (dv + 0.5) * r**4) / c
 
-    return apply_radial_delay(envelope, tau_delay)
+    alpha = -dv * d0 / R**2 / c
+    beta0 = 1 / (4 * f0**2) * d0 / R**2 / c
+    beta = beta0 * (1 + 2 * dv)
+
+    tau_delay = alpha * r**2 + beta * r**4
+
+    envelope = apply_radial_delay(envelope, tau_delay)
+
+    if compensate_elongation:
+        omega0 = envelope.omega0 / ureg.s
+
+        gdd = (alpha**2 / 2 + 2 * alpha * beta * r**2 + 2 * beta**2 * r**4) / (beta0 * omega0)
+
+        envelope = apply_radial_GDD(envelope, gdd)
+
+    return envelope
