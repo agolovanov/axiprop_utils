@@ -952,3 +952,27 @@ def calculate_fluence_radius(envelope: ScalarFieldEnvelope | dict, threshold: fl
     max_fluence = np.max(fluence)
 
     return r[::-1][np.argmax(fluence[::-1] > threshold * max_fluence)]
+
+
+def apply_radial_delay(envelope: ScalarFieldEnvelope, tau_delay: np.array | pint.Quantity) -> ScalarFieldEnvelope:
+    """Add a radial delay to the pulse.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        the pulse to be modified
+    tau_delay : np.array | pint.Quantity
+        the radial delay as a function of radius. Should have the same shape as the envelope.r axis.
+
+    Returns
+    -------
+    ScalarFieldEnvelope
+        the pulse with the added radial delay
+    """
+
+    
+    if isinstance(tau_delay, pint.Quantity):
+        tau_delay = tau_delay.m_as('s')
+    
+    spectral_phase = np.exp(1j * (envelope.omega[:, np.newaxis] - envelope.omega0) * tau_delay)
+    return apply_spectral_multiplier(envelope, spectral_phase)

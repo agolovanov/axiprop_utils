@@ -88,12 +88,11 @@ def add_constant_velocity_phase(
     ScalarFieldEnvelope
         The envelope with the added phase term
     """
-    from . import apply_spectral_multiplier
+    from . import apply_radial_delay
 
     c = ureg('speed_of_light')
 
     r = envelope.r * ureg.m
-    tau_delay = (d0 / R**2 * (-dv * r**2 + 1 / (2 * f0**2) * (dv + 0.5) * r**4) / c).m_as('s')
+    tau_delay = d0 / R**2 * (-dv * r**2 + 1 / (2 * f0**2) * (dv + 0.5) * r**4) / c
 
-    spectral_phase = np.exp(1j * (envelope.omega[:, np.newaxis] - envelope.omega0) * tau_delay)
-    return apply_spectral_multiplier(envelope, spectral_phase)
+    return apply_radial_delay(envelope, tau_delay)
