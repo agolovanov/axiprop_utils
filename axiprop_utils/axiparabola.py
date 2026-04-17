@@ -74,6 +74,7 @@ def add_constant_velocity_phase(
     d0: 'Quantity',
     R: 'Quantity',
     compensate_elongation: bool = False,
+    return_correction_terms: bool = False,
 ) -> 'ScalarFieldEnvelope':
     """Add a phase term to the envelope representing a constant velocity along the optical axis for an axiparabola.
 
@@ -91,11 +92,14 @@ def add_constant_velocity_phase(
         The radius of the axiparabola
     compensate_elongation : bool, optional
         Whether to compensate for the elongation of the pulse due to the delay term by adding a GDD term, by default False
+    return_correction_terms : bool, optional
+        Whether to return the correction terms (tau_delay and gdd) along with the envelope, by default False
 
     Returns
     -------
     ScalarFieldEnvelope
-        The envelope with the added phase term
+        The envelope with the added phase term.
+        If `return_correction_terms` is True, also returns either (envelope, tau_delay) or (envelope, tau_delay, gdd) depending on the value of `compensate_elongation`
     """
     from . import apply_radial_delay, apply_radial_GDD
 
@@ -118,4 +122,10 @@ def add_constant_velocity_phase(
 
         envelope = apply_radial_GDD(envelope, gdd)
 
-    return envelope
+    if return_correction_terms:
+        if compensate_elongation:
+            return envelope, tau_delay, gdd
+        else:
+            return envelope, tau_delay
+    else:
+        return envelope
