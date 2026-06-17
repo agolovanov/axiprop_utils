@@ -884,13 +884,33 @@ def read_from_lasy(
     return scl
 
 
-def add_pulse_front_curvature(envelope: ScalarFieldEnvelope, pfc):
-    pfc_phase = np.exp(1j * pfc.m_as('s/m^2') * envelope.r**2 * (envelope.omega - envelope.omega0)[:, np.newaxis])
-    field = envelope.Field_ft * pfc_phase
+def add_pulse_front_curvature(
+    envelope: ScalarFieldEnvelope, pfc: pint.Quantity, *, return_correction_terms: bool = False
+) -> ScalarFieldEnvelope | tuple[ScalarFieldEnvelope, pint.Quantity]:
+    """Add pulse front curvature (PFC) to the envelope.
 
-    return ScalarFieldEnvelope(
-        envelope.k0, envelope.t, n_dump_r=envelope.n_dump_r, n_dump_t=envelope.n_dump_t
-    ).import_field_ft(field, r_axis=envelope.r, transform=True)
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        The input envelope
+    pfc : pint.Quantity
+        The pulse front curvature value
+    return_correction_terms : bool, optional
+        Whether to return the applied radial delay along with the envelope, by default False
+
+    Returns
+    -------
+    ScalarFieldEnvelope
+        The envelope with added pulse front curvature.
+        If `return_correction_terms` is True, also returns (envelope, tau_delay).
+    """
+    tau_delay = pfc * (envelope.r * ureg.m) ** 2
+    envelope = apply_radial_delay(envelope, tau_delay)
+
+    if return_correction_terms:
+        return envelope, tau_delay
+    else:
+        return envelope
 
 
 def propagate_envelope(
