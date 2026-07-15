@@ -52,7 +52,7 @@ def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
         sag_equation,
         (r_loc[0], r_loc[-1]),
         [
-            r_loc[0] / (4 * f0),
+            r_loc[0] ** 2 / (4 * f0),
         ],
         t_eval=r_loc,
         method='DOP853',
@@ -60,7 +60,7 @@ def mirror_axiparabola(kz, r, f0, d0, R, N_cut=4):
         atol=1e-16,
     ).y.flatten()
 
-    s_ax[:N_cut] = s_ax[N_cut]
+    s_ax[:N_cut] = r[:N_cut] ** 2 / (4 * f0)
     s_ax -= s_ax[0]
 
     return mirror_reflection(kz, s_ax)
