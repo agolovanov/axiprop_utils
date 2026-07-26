@@ -3,6 +3,26 @@ name = "axiprop_utils"
 version = "0.9.0"
 description = "Helper functions for the Axiprop code"
 authors = [{ name = "Anton Golovanov" }]
+requires-python = ">=3.10"
+dependencies = [
+    "axiprop",
+    "h5py",
+    "lasy",
+    "matplotlib",
+    "mpl_utils",
+    "numpy",
+    "pic_utils @ git+https://github.com/agolovanov/pic_utils.git",
+    "pint",
+    "scipy",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "pytest",
+    "ruff",
+]
 
 [build-system]
 requires = ["setuptools"]
