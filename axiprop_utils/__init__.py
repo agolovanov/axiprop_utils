@@ -1,12 +1,14 @@
 import typing
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pint
 from axiprop.containers import ScalarFieldEnvelope
 
-from .pulse import create_gaussian_pulse
 from .axiparabola import mirror_axiparabola
+from .optical_elements import AxisymmetricMirror, ParabolicMirror
+from .pulse import create_gaussian_pulse
 
 if typing.TYPE_CHECKING:
     from typing import Any, Tuple
@@ -47,7 +49,17 @@ def mirror_reflection(kz, s):
 
 
 def mirror_parabolic(kz, r, f0):
-    return mirror_reflection(kz, r**2 / (4 * f0))
+    """Calculate the spectral multiplier produced by a parabolic mirror.
+
+    .. deprecated::
+        Use :class:`ParabolicMirror` instead.
+    """
+    warnings.warn(
+        'mirror_parabolic() is deprecated; use ParabolicMirror instead',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return ParabolicMirror(f0)._spectral_multiplier(kz, r)
 
 
 def hole(r, r_hole, *, l_smooth=None, order_smooth=2):
