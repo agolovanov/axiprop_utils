@@ -34,8 +34,22 @@ class AxisymmetricMirror(ABC):
             Mirror sag relative to the reference plane.
         """
 
-    def _spectral_multiplier(self, kz: np.ndarray | Quantity, r: Quantity) -> np.ndarray:
-        """Calculate the spectral multiplier produced by the mirror."""
+    def spectral_multiplier(self, kz: np.ndarray | Quantity, r: Quantity) -> np.ndarray:
+        """Calculate the spectral multiplier produced by the mirror.
+
+        Parameters
+        ----------
+        kz : np.ndarray or pint.Quantity of shape (N_kz,)
+            Longitudinal wavevector axis. Unitless arrays are interpreted in
+            inverse metres.
+        r : pint.Quantity of shape (N_r,)
+            Radial coordinates.
+
+        Returns
+        -------
+        np.ndarray of shape (N_kz, N_r)
+            Complex spectral multiplier representing the reflection.
+        """
         sag = self.sag(r)
         if not isinstance(sag, pint.Quantity):
             raise TypeError('sag() must return a pint.Quantity')
@@ -79,7 +93,7 @@ class AxisymmetricMirror(ABC):
         if is_envelope_3d(envelope):
             raise ValueError('AxisymmetricMirror can only be applied to an axisymmetric envelope')
 
-        multiplier = self._spectral_multiplier(envelope.k_freq, envelope.r * ureg.m)
+        multiplier = self.spectral_multiplier(envelope.k_freq, envelope.r * ureg.m)
         return apply_spectral_multiplier(envelope, multiplier)
 
 

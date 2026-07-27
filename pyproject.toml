@@ -1,6 +1,6 @@
 [project]
 name = "axiprop_utils"
-version = "0.9.0"
+version = "0.10.0"
 description = "Helper functions for the Axiprop code"
 authors = [{ name = "Anton Golovanov" }]
 requires-python = ">=3.10"
@@ -18,11 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "build",
-    "pytest",
-    "ruff",
-]
+dev = ["build", "pytest", "ruff"]
 
 [build-system]
 requires = ["setuptools"]

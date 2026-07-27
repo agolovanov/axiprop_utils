@@ -31,7 +31,7 @@ def test_mirror_parabolic_delegates_to_class():
     with pytest.warns(DeprecationWarning, match='ParabolicMirror'):
         actual = mirror_parabolic(kz, r, focal_length)
 
-    expected = mirror._spectral_multiplier(kz, r)
+    expected = mirror.spectral_multiplier(kz, r)
     np.testing.assert_allclose(actual, expected)
 
 

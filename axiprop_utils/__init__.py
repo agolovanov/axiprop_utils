@@ -6,7 +6,7 @@ import numpy as np
 import pint
 from axiprop.containers import ScalarFieldEnvelope
 
-from .axiparabola import mirror_axiparabola
+from .axiparabola import ConstantIntensityAxiparabola, mirror_axiparabola
 from .optical_elements import AxisymmetricMirror, ParabolicMirror
 from .pulse import create_gaussian_pulse
 
@@ -59,7 +59,7 @@ def mirror_parabolic(kz, r, f0):
         DeprecationWarning,
         stacklevel=2,
     )
-    return ParabolicMirror(f0)._spectral_multiplier(kz, r)
+    return ParabolicMirror(f0).spectral_multiplier(kz, r)
 
 
 def hole(r, r_hole, *, l_smooth=None, order_smooth=2):
