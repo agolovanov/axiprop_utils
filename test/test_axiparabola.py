@@ -61,6 +61,17 @@ def test_axiparabola_parameters_are_validated_at_creation(focal_length, focal_de
         ConstantIntensityAxiparabola(focal_length, focal_depth, radius)
 
 
+def test_axiparabola_requires_positive_focal_distance_at_mirror_edge():
+    """A reduced beam radius should scale the focal-distance validation."""
+    with pytest.raises(ValueError, match='focal_length \\+ focal_depth'):
+        ConstantIntensityAxiparabola(
+            focal_length=0.5 * ureg.m,
+            focal_depth=-0.2 * ureg.m,
+            radius=20 * ureg.mm,
+            beam_radius=10 * ureg.mm,
+        )
+
+
 @pytest.mark.parametrize(
     'r',
     [

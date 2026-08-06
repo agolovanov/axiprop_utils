@@ -22,6 +22,11 @@ if typing.TYPE_CHECKING:
 class ConstantIntensityAxiparabola(AxisymmetricMirror):
     """Axiparabola designed to produce a constant on-axis intensity.
 
+    It corresponds to a focal line of 
+    ```math
+        f(r) = focal_length + focal_depth * (r / beam_radius)**2
+    ```
+
     Parameters
     ----------
     focal_length : pint.Quantity
@@ -30,26 +35,37 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         Length of the focal line.
     radius : pint.Quantity
         Mirror radius.
+    beam_radius : pint.Quantity, optional
+        Radius of the beam on the mirror corresponding to the desired focal depth. If not provided, the mirror radius is used.
     """
 
     focal_length: 'Quantity'
     focal_depth: 'Quantity'
     radius: 'Quantity'
+    beam_radius: 'Quantity' = None
 
     def __post_init__(self):
         """Validate the mirror parameters."""
         focal_length_m = self.focal_length.m_as('m')
         focal_depth_m = self.focal_depth.m_as('m')
         radius_m = self.radius.m_as('m')
+        if self.beam_radius is None:
+            object.__setattr__(self, 'beam_radius', self.radius)
+        beam_radius_m = self.beam_radius.m_as('m')
 
-        if not np.all(np.isfinite([focal_length_m, focal_depth_m, radius_m])):
+        if not np.all(np.isfinite([focal_length_m, focal_depth_m, radius_m, beam_radius_m])):
             raise ValueError('Mirror parameters must be finite')
         if focal_length_m <= 0:
             raise ValueError('focal_length must be positive')
         if radius_m <= 0:
             raise ValueError('radius must be positive')
-        if focal_length_m + focal_depth_m <= 0:
-            raise ValueError('focal_length + focal_depth must be positive')
+        if beam_radius_m <= 0:
+            raise ValueError('beam_radius must be positive')
+        if beam_radius_m > radius_m:
+            raise ValueError('beam_radius cannot exceed mirror radius')
+        edge_focal_distance_m = focal_length_m + focal_depth_m * (radius_m / beam_radius_m) ** 2
+        if edge_focal_distance_m <= 0:
+            raise ValueError('focal_length + focal_depth * (radius / beam_radius) ** 2 must be positive')
 
     def sag(self, r: 'Quantity') -> 'Quantity':
         """Evaluate the axiparabola sag by solving its surface equation."""
@@ -59,6 +75,7 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         focal_length_m = self.focal_length.m_as('m')
         focal_depth_m = self.focal_depth.m_as('m')
         radius_m = self.radius.m_as('m')
+        beam_radius_m = self.beam_radius.m_as('m')
 
         if r_m.ndim != 1:
             raise ValueError('r must be one-dimensional')
@@ -76,7 +93,7 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             return np.zeros_like(r_m) * ureg.m
 
         def sag_equation(radial_coordinate, sag):
-            focal_distance = focal_length_m + focal_depth_m * (radial_coordinate / radius_m) ** 2
+            focal_distance = focal_length_m + focal_depth_m * (radial_coordinate / beam_radius_m) ** 2
             distance_to_focus = focal_distance - sag[0]
             denominator = np.hypot(radial_coordinate, distance_to_focus) + distance_to_focus
             return [radial_coordinate / denominator]
@@ -114,8 +131,8 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             Quartic radial-delay coefficient.
         """
         c = ureg('speed_of_light')
-        alpha = -dv * self.focal_depth / self.radius**2 / c
-        beta0 = self.focal_depth / (4 * self.focal_length**2 * self.radius**2 * c)
+        alpha = -dv * self.focal_depth / self.beam_radius**2 / c
+        beta0 = self.focal_depth / (4 * self.focal_length**2 * self.beam_radius**2 * c)
         beta = beta0 * (1 + 2 * dv)
         return alpha, beta
 
@@ -153,7 +170,7 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         r = envelope.r * ureg.m
 
         alpha, beta = self.calculate_constant_velocity_coefficients(dv)
-        beta0 = self.focal_depth / (4 * self.focal_length**2 * self.radius**2 * c)
+        beta0 = self.focal_depth / (4 * self.focal_length**2 * self.beam_radius**2 * c)
         tau_delay = alpha * r**2 + beta * r**4
 
         envelope = apply_radial_delay(envelope, tau_delay)
