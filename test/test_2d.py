@@ -33,6 +33,9 @@ def test_analyze_field_gaussian():
 
     fwhm = fwhm_radial(stats['fluence'], stats['r'])
     np.testing.assert_allclose(fwhm.m_as('m'), radius.m_as('m') * np.sqrt(2 * np.log(2)), rtol=1e-3)
+    np.testing.assert_allclose(stats['d_fwhm'].m_as('m'), fwhm.m_as('m'))
+    np.testing.assert_allclose(stats['r_fwhm'].m_as('m'), fwhm.m_as('m') / 2)
+    np.testing.assert_allclose(stats['w0'].m_as('m'), radius.m_as('m'), rtol=1e-3)
 
     np.testing.assert_allclose(np.trapezoid(stats['power'], stats['t']).m_as('J'), energy.m_as('J'), rtol=1e-3)
     np.testing.assert_allclose(

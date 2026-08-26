@@ -211,7 +211,7 @@ def plot_field(
         print(f'x size: {field["x_fwhm"]:.3g~} (FWHM), {field["w0_x"]:.3g~} (1/e^2 spot size equivalent)')
         print(f'y size: {field["y_fwhm"]:.3g~} (FWHM), {field["w0_y"]:.3g~} (1/e^2 spot size equivalent)')
     else:
-        print(f'Transverse size: {field["r_fwhm"]:.3g~} (FWHM), {field["w0"]:.3g~} (1/e^2 spot size equivalent)')
+        print(f'Transverse size: {field["d_fwhm"]:.3g~} (FWHM), {field["w0"]:.3g~} (1/e^2 spot size equivalent)')
 
     if t_lim is None:
         t_lim = np.min(t_axis), np.max(t_axis)
@@ -441,8 +441,9 @@ def analyze_field(
         w0_x = x_fwhm / np.sqrt(2 * np.log(2))
         w0_y = y_fwhm / np.sqrt(2 * np.log(2))
     else:
-        r_fwhm = fwhm_radial(fluence, r_axis)
-        w0 = r_fwhm / np.sqrt(2 * np.log(2))
+        d_fwhm = fwhm_radial(fluence, r_axis)
+        r_fwhm = d_fwhm / 2
+        w0 = d_fwhm / np.sqrt(2 * np.log(2))
 
     output = {
         'envelope': scl,
@@ -488,6 +489,7 @@ def analyze_field(
         output['intensity'] = intensity
         output['spectral_intensity'] = spectral_intensity
         output['3d'] = False
+        output['d_fwhm'] = d_fwhm
         output['r_fwhm'] = r_fwhm
         output['w0'] = w0
         output['phase'] = phase
@@ -545,6 +547,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False, sh
         w0_y = np.zeros(z_size)
     else:
         fluence = np.ones((z_size, r_size))
+        d_fwhm = np.zeros(z_size)
         r_fwhm = np.zeros(z_size)
         w0 = np.zeros(z_size)
 
@@ -578,6 +581,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False, sh
             w0_y[i] = analysis['w0_y'].m_as('um')
         else:
             fluence[i] = analysis['fluence'].m_as('J/cm^2')
+            d_fwhm[i] = analysis['d_fwhm'].m_as('um')
             r_fwhm[i] = analysis['r_fwhm'].m_as('um')
             w0[i] = analysis['w0'].m_as('um')
             max_intensity_transverse[i] = np.max(analysis['intensity'], axis=0).m_as('W/cm^2')
@@ -600,6 +604,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False, sh
         w0_y = w0_y * ureg('um')
     else:
         fluence = fluence * ureg('J/cm^2')
+        d_fwhm = d_fwhm * ureg('um')
         r_fwhm = r_fwhm * ureg('um')
         w0 = w0 * ureg('um')
         max_intensity_transverse = max_intensity_transverse * ureg('W/cm^2')
@@ -638,6 +643,7 @@ def analyze_time_series(field_array, z_axis, t_axis, r_axis, k0, is_3d=False, sh
     else:
         res['r'] = r_axis
         res['fluence'] = fluence
+        res['d_fwhm'] = d_fwhm
         res['r_fwhm'] = r_fwhm
         res['w0'] = w0
         res['max_intensity_transverse'] = max_intensity_transverse
