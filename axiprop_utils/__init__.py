@@ -15,7 +15,13 @@ if typing.TYPE_CHECKING:
 
     import matplotlib
     import matplotlib.figure
-    from axiprop.lib import PropagatorFFT2, PropagatorFFT2Fresnel, PropagatorResampling, PropagatorSymmetric
+    from axiprop.lib import (
+        PropagatorFFT2,
+        PropagatorFFT2Fresnel,
+        PropagatorResampling,
+        PropagatorResamplingFresnel,
+        PropagatorSymmetric,
+    )
     from axiprop.steppers import StepperFresnel, StepperNonParaxial
 
 ureg = pint.get_application_registry()
@@ -656,6 +662,58 @@ def create_resampling_propagator(
     return PropagatorResampling(r_axis=envelope.r, kz_axis=envelope.k_freq, r_axis_new=(R_new.m_as('m'), Nr_new))
 
 
+def create_resampling_propagator_fresnel(
+    envelope: ScalarFieldEnvelope,
+    R_new: pint.Quantity,
+    Nr_new: int,
+    *,
+    design_distance: pint.Quantity,
+    **prop_kwargs,
+) -> 'PropagatorResamplingFresnel':
+    """Create an axisymmetric Fresnel propagator with radial resampling.
+
+    The design distance determines the numerical sampling of the Fresnel
+    transform. For propagation to a single plane, it should equal the
+    propagation distance. When evaluating several nearby planes, it should
+    normally be the smallest positive propagation distance.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        Envelope defining the input radial and longitudinal-wavenumber grids.
+    R_new : pint.Quantity
+        Radial extent of the output grid.
+    Nr_new : int
+        Number of points in the output radial grid.
+    design_distance : pint.Quantity
+        Positive reference propagation distance used to construct the
+        Fresnel-transform grid.
+    **prop_kwargs
+        Additional arguments passed to ``PropagatorResamplingFresnel``.
+
+    Returns
+    -------
+    PropagatorResamplingFresnel
+        The configured propagator.
+    """
+    from axiprop.lib import PropagatorResamplingFresnel
+
+    if is_envelope_3d(envelope):
+        raise ValueError('A radial resampling propagator can only be created based on an axisymmetric envelope')
+
+    design_distance_m = design_distance.m_as('m')
+    if design_distance_m <= 0:
+        raise ValueError('The Fresnel design distance must be positive')
+
+    return PropagatorResamplingFresnel(
+        r_axis=envelope.r,
+        kz_axis=envelope.k_freq,
+        dz=design_distance_m,
+        r_axis_new=(R_new.m_as('m'), Nr_new),
+        **prop_kwargs,
+    )
+
+
 def create_propagator_3d(envelope: ScalarFieldEnvelope) -> 'PropagatorFFT2':
     from axiprop.lib import PropagatorFFT2
 
@@ -722,11 +780,13 @@ def get_propagator_r_axis(
     np.ndarray | Tuple[np.ndarray, np.ndarray, np.ndarray]
         the r axis
     """
-    from axiprop.lib import PropagatorFFT2Fresnel, PropagatorResampling
+    from axiprop.lib import PropagatorFFT2Fresnel, PropagatorResampling, PropagatorResamplingFresnel
 
     from axiprop_utils.utils import generate_r_axis
 
     if isinstance(propagator, PropagatorResampling):
+        return propagator.r_new
+    elif isinstance(propagator, PropagatorResamplingFresnel):
         return propagator.r_new
     elif isinstance(propagator, PropagatorFFT2Fresnel):
         return generate_r_axis(*propagator.r_new)
@@ -926,7 +986,9 @@ def add_pulse_front_curvature(
 
 
 def propagate_envelope(
-    envelope: ScalarFieldEnvelope, distance: pint.Quantity, propagator: 'StepperNonParaxial'
+    envelope: ScalarFieldEnvelope,
+    distance: pint.Quantity,
+    propagator: 'StepperNonParaxial | StepperFresnel',
 ) -> ScalarFieldEnvelope:
     """Propagate an envelope to a specific coordinate.
 
@@ -936,7 +998,7 @@ def propagate_envelope(
         Envelope to be propagated
     distance : pint.Quantity
         Propagation distance
-    propagator : StepperNonParaxial
+    propagator : StepperNonParaxial | StepperFresnel
         The propagator
 
     Returns
