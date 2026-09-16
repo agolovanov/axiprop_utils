@@ -1,3 +1,5 @@
+"""Tests for axiparabola optics."""
+
 import numpy as np
 import pint
 import pytest
@@ -25,6 +27,12 @@ def test_axiparabola_reduces_to_parabolic_mirror():
         rtol=1e-11,
         atol=1e-16,
     )
+    np.testing.assert_allclose(
+        mirror.sag_der(r),
+        ParabolicMirror(focal_length).sag_der(r),
+        rtol=1e-11,
+        atol=1e-16,
+    )
 
     with pytest.warns(DeprecationWarning, match='ConstantIntensityAxiparabola'):
         axiparabola = mirror_axiparabola(kz, r, focal_length, 0 * ureg.m, radius, N_cut=N_cut)
@@ -32,6 +40,19 @@ def test_axiparabola_reduces_to_parabolic_mirror():
         parabola = mirror_parabolic(kz, r, focal_length)
 
     np.testing.assert_allclose(axiparabola, parabola, rtol=1e-7, atol=1e-7)
+
+
+@pytest.mark.parametrize('depth', [-0.1, 0.1])
+def test_sag_der(depth):
+    """Integrating the surface slope should reproduce the sag difference."""
+    from scipy.integrate import simpson
+
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, depth * ureg.m, 20 * ureg.mm)
+    r = np.linspace(0, 20, 101) * ureg.mm
+    slope = mirror.sag_der(r)
+    sag = mirror.sag(r).m_as('m')
+    assert slope[0] == 0
+    np.testing.assert_allclose(simpson(slope, x=r.m_as('m')), sag[-1] - sag[0], rtol=1e-8)
 
 
 def test_axiparabola_sag_starts_at_vertex():

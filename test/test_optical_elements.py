@@ -1,13 +1,58 @@
 """Tests for optical element classes."""
 
+import warnings
+
 import numpy as np
 import pint
 import pytest
 
 from axiprop_utils import ParabolicMirror, mirror_parabolic, mirror_reflection
+from axiprop_utils.optical_elements import AxisymmetricMirror
 from axiprop_utils.pulse import create_gaussian_pulse
 
 ureg = pint.get_application_registry()
+
+
+@pytest.mark.parametrize('threshold, expected', [(1, 9), (0.5, 17), (2, 5)])
+@pytest.mark.parametrize('k0', [np.pi, np.pi / ureg.m])
+def test_minimum_nr(threshold, expected, k0):
+    """Match the analytic parabolic slope and satisfy the phase-step limit."""
+    mirror = ParabolicMirror(0.5 * ureg.m)
+    r = np.array([0, 2000]) * ureg.mm
+    nr = mirror.minimum_nr(r, k0=k0, nyquist_threshold=threshold)
+    assert nr == expected
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        mirror.spectral_multiplier(np.array([np.pi]), np.linspace(r[0], r[-1], nr), k0=k0, nyquist_threshold=threshold)
+
+
+def test_flat_minimum_nr():
+    """A flat mirror needs only the endpoints for its phase correction."""
+
+    class FlatMirror(AxisymmetricMirror):
+        def sag(self, r):
+            raise AssertionError('minimum_nr should use sag_der directly')
+
+        def sag_der(self, r):
+            return np.zeros(r.shape)
+
+    assert FlatMirror().minimum_nr(np.linspace(0, 1, 3) * ureg.m, k0=1) == 2
+
+
+@pytest.mark.parametrize('k0', [np.pi, np.pi / ureg.m])
+def test_phase_step_warning(k0):
+    """Detect aliased phase steps independently of the spectral extremes."""
+    mirror = ParabolicMirror(0.5 * ureg.m)
+    r = np.array([0, 2]) * ureg.m
+    kz = np.array([0.01, 100])
+    expected = mirror.spectral_multiplier(kz, r)
+    with pytest.warns(UserWarning, match='reaches 4 \\* pi'):
+        actual = mirror.spectral_multiplier(kz, r, k0=k0)
+    np.testing.assert_array_equal(actual, expected)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        mirror.spectral_multiplier(kz, r, k0=k0, nyquist_threshold=4)
+        mirror.spectral_multiplier(kz, r[:1], k0=k0)
 
 
 def test_parabolic_mirror_sag():
@@ -18,6 +63,7 @@ def test_parabolic_mirror_sag():
     sag = ParabolicMirror(focal_length).sag(r)
 
     np.testing.assert_allclose(sag.m_as('m'), (r**2 / (4 * focal_length)).m_as('m'))
+    np.testing.assert_allclose(ParabolicMirror(focal_length).sag_der(r), r.m_as('m') / (2 * focal_length.m_as('m')))
 
 
 def test_mirror_parabolic_delegates_to_class():
@@ -54,6 +100,9 @@ def test_parabolic_mirror_apply_returns_new_envelope():
     mirror = ParabolicMirror(0.5 * ureg.m)
 
     reflected = mirror.apply(envelope)
+    with pytest.warns(UserWarning, match='at k0'):
+        reflected_strict = mirror.apply(envelope, nyquist_threshold=0.01)
+    np.testing.assert_array_equal(reflected_strict.Field_ft, reflected.Field_ft)
     sag = mirror.sag(envelope.r * ureg.m)
     expected_multiplier = mirror_reflection(envelope.k_freq / ureg.m, sag)
 

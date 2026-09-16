@@ -1,6 +1,4 @@
-"""
-Module for axiparabola utilities
-"""
+"""Module for axiparabola utilities."""
 
 import typing
 import warnings
@@ -22,7 +20,7 @@ if typing.TYPE_CHECKING:
 class ConstantIntensityAxiparabola(AxisymmetricMirror):
     """Axiparabola designed to produce a constant on-axis intensity.
 
-    It corresponds to a focal line of 
+    It corresponds to a focal line of
     ```math
         f(r) = focal_length + focal_depth * (r / beam_radius)**2
     ```
@@ -111,6 +109,13 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             raise RuntimeError(f'Failed to calculate axiparabola sag: {solution.message}')
 
         return solution.y[0] * ureg.m
+
+    def sag_der(self, r: 'Quantity') -> np.ndarray:
+        """Evaluate ds/dr directly from the axiparabola surface equation."""
+        sag = self.sag(r)
+        focal_distance = self.focal_length + self.focal_depth * (r / self.beam_radius) ** 2
+        distance_to_focus = focal_distance - sag
+        return (r / (np.hypot(r, distance_to_focus) + distance_to_focus)).m_as('')
 
     def calculate_constant_velocity_coefficients(self, dv: float) -> tuple['Quantity', 'Quantity']:
         """Calculate the radial-delay coefficients for a focal velocity.
