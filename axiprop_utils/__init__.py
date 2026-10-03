@@ -661,9 +661,36 @@ def create_symmetric_propagator(envelope: ScalarFieldEnvelope) -> 'PropagatorSym
 
 
 def create_resampling_propagator(
-    envelope: ScalarFieldEnvelope, R_new: pint.Quantity, Nr_new: int
+    envelope: ScalarFieldEnvelope, R_new: pint.Quantity, Nr_new: int, *, cache_dir: str | Path | None = None
 ) -> 'PropagatorResampling':
+    """Create a radial resampling propagator with optional disk caching.
+
+    Parameters
+    ----------
+    envelope : ScalarFieldEnvelope
+        Envelope defining the input radial and wavenumber grids.
+    R_new : pint.Quantity
+        Radial extent of the output grid.
+    Nr_new : int
+        Number of output radial points.
+    cache_dir : str or pathlib.Path, optional
+        Directory for HDF5 transform-matrix caches. Missing or incompatible
+        entries are rebuilt. All installed Python package versions participate
+        in cache identity. By default, no cache is read or written.
+
+    Returns
+    -------
+    PropagatorResampling
+        Propagator with fresh backend buffers and optionally cached matrices.
+    """
     from axiprop.lib import PropagatorResampling
+
+    if cache_dir is not None:
+        from .cache import PropagatorResamplingCache
+
+        return PropagatorResamplingCache(
+            r_axis=envelope.r, kz_axis=envelope.k_freq, r_axis_new=(R_new.m_as('m'), Nr_new), cache_dir=cache_dir
+        )
 
     return PropagatorResampling(r_axis=envelope.r, kz_axis=envelope.k_freq, r_axis_new=(R_new.m_as('m'), Nr_new))
 
