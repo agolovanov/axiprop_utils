@@ -65,8 +65,8 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         if edge_focal_distance_m <= 0:
             raise ValueError('focal_length + focal_depth * (radius / beam_radius) ** 2 must be positive')
 
+    @typing.override
     def sag(self, r: 'Quantity') -> 'Quantity':
-        """Evaluate the axiparabola sag by solving its surface equation."""
         from scipy.integrate import solve_ivp
 
         r_m = np.asarray(r.m_as('m'))
@@ -110,12 +110,16 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
 
         return solution.y[0] * ureg.m
 
-    def sag_der(self, r: 'Quantity') -> np.ndarray:
-        """Evaluate ds/dr directly from the axiparabola surface equation."""
+    @typing.override
+    def _H_func(self, r: 'Quantity') -> 'Quantity':
         sag = self.sag(r)
-        focal_distance = self.focal_length + self.focal_depth * (r / self.beam_radius) ** 2
+        focal_distance = self.focal_distance(r)
         distance_to_focus = focal_distance - sag
-        return (r / (np.hypot(r, distance_to_focus) + distance_to_focus)).m_as('')
+        return 1 / (np.hypot(r, distance_to_focus) + distance_to_focus)
+
+    @typing.override
+    def focal_distance(self, r: 'Quantity') -> 'Quantity':
+        return self.focal_length + self.focal_depth * (r / self.beam_radius) ** 2
 
     def calculate_constant_velocity_coefficients(self, dv: float) -> tuple['Quantity', 'Quantity']:
         """Calculate the radial-delay coefficients for a focal velocity.

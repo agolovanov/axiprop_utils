@@ -6,6 +6,7 @@ import pytest
 
 from axiprop_utils import ConstantIntensityAxiparabola, ParabolicMirror, mirror_axiparabola, mirror_parabolic
 from axiprop_utils.axiparabola import add_constant_velocity_phase
+from axiprop_utils.optical_elements import AxisymmetricMirror
 from axiprop_utils.pulse import create_gaussian_pulse
 
 ureg = pint.get_application_registry()
@@ -40,6 +41,24 @@ def test_axiparabola_reduces_to_parabolic_mirror():
         parabola = mirror_parabolic(kz, r, focal_length)
 
     np.testing.assert_allclose(axiparabola, parabola, rtol=1e-7, atol=1e-7)
+
+
+@pytest.mark.parametrize('depth', [-0.1, 0, 0.1])
+@pytest.mark.parametrize('beam_radius', [None, 10 * ureg.mm])
+def test_axiparabola_focal_distance(depth, beam_radius):
+    """The surface should reproduce the prescribed focal mapping with a finite vertex H."""
+    mirror = ConstantIntensityAxiparabola(50 * ureg.cm, depth * ureg.m, 20 * ureg.mm, beam_radius)
+    r = np.array([0, 1, 5, 20]) * ureg.mm
+
+    H = mirror._H_func(r).m_as('1/m')
+    assert np.all(np.isfinite(H))
+    np.testing.assert_allclose(H[0], 1.0, rtol=1e-14)
+    expected = mirror.focal_length + mirror.focal_depth * (r / mirror.beam_radius) ** 2
+    analytical = mirror.focal_distance(r)
+    generic = AxisymmetricMirror.focal_distance(mirror, r)
+    assert analytical.shape == r.shape
+    np.testing.assert_allclose(analytical.m_as('m'), expected.m_as('m'), rtol=1e-13)
+    np.testing.assert_allclose(analytical.m_as('m'), generic.m_as('m'), rtol=1e-13)
 
 
 @pytest.mark.parametrize('depth', [-0.1, 0.1])

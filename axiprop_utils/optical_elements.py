@@ -36,6 +36,22 @@ class AxisymmetricMirror(ABC):
         """
 
     @abstractmethod
+    def _H_func(self, r: Quantity) -> Quantity:
+        """Evaluate the mirror's auxiliary function H(r) = sag_der(r) / r.
+
+        For a smooth surface, its value at r=0 is the limit H(0) = s''(0).
+
+        Parameters
+        ----------
+        r : pint.Quantity of shape (N_r,)
+            Radial coordinates at which to evaluate the H function.
+
+        Returns
+        -------
+        pint.Quantity of shape (N_r,)
+            The H function values in inverse-length units at each radial coordinate.
+        """
+
     def sag_der(self, r: Quantity) -> np.ndarray:
         """Evaluate the radial derivative of the mirror sag.
 
@@ -49,6 +65,23 @@ class AxisymmetricMirror(ABC):
         np.ndarray of shape (N_r,)
             Dimensionless slope ds/dr at each radial coordinate.
         """
+        return (self._H_func(r) * r).m_as('')
+
+    def focal_distance(self, r: Quantity) -> Quantity:
+        """Evaluate the local focal distance from the reference plane.
+
+        Parameters
+        ----------
+        r : pint.Quantity of shape (N_r,)
+            Radial coordinates.
+
+        Returns
+        -------
+        pint.Quantity of shape (N_r,)
+            Local focal distance at each radial coordinate.
+        """
+        H_value = self._H_func(r)
+        return self.sag(r) + (1 - (r * H_value) ** 2) / (2 * H_value)
 
     def spectral_multiplier(
         self,
@@ -228,6 +261,10 @@ class ParabolicMirror(AxisymmetricMirror):
         """Evaluate the parabolic sag ``r**2 / (4 * focal_length)``."""
         return r**2 / (4 * self.focal_length)
 
-    def sag_der(self, r: Quantity) -> np.ndarray:
-        """Evaluate the parabolic slope ``r / (2 * focal_length)``."""
-        return (r / (2 * self.focal_length)).m_as('')
+    def _H_func(self, r: Quantity) -> Quantity:
+        """Evaluate the constant parabolic H function ``1 / (2 * focal_length)``."""
+        return np.ones(r.shape) / (2 * self.focal_length)
+
+    @typing.override
+    def focal_distance(self, r: Quantity) -> Quantity:
+        return np.ones(r.shape) * self.focal_length

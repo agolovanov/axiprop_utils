@@ -34,8 +34,8 @@ def test_flat_minimum_nr():
         def sag(self, r):
             raise AssertionError('minimum_nr should use sag_der directly')
 
-        def sag_der(self, r):
-            return np.zeros(r.shape)
+        def _H_func(self, r):
+            return np.zeros(r.shape) / ureg.m
 
     assert FlatMirror().minimum_nr(np.linspace(0, 1, 3) * ureg.m, k0=1) == 2
 
@@ -86,6 +86,20 @@ def test_parabolic_mirror_sag():
 
     np.testing.assert_allclose(sag.m_as('m'), (r**2 / (4 * focal_length)).m_as('m'))
     np.testing.assert_allclose(ParabolicMirror(focal_length).sag_der(r), r.m_as('m') / (2 * focal_length.m_as('m')))
+
+
+@pytest.mark.parametrize('r_mm', [[], [0], [0, 1, 10, 800]])
+def test_parabolic_mirror_focal_distance(r_mm):
+    """All parabolic rays should focus at the same distance, including at the vertex."""
+    mirror = ParabolicMirror(50 * ureg.cm)
+    r = np.array(r_mm) * ureg.mm
+
+    np.testing.assert_allclose(mirror._H_func(r).m_as('1/m'), np.ones(r.shape))
+    analytical = mirror.focal_distance(r)
+    generic = AxisymmetricMirror.focal_distance(mirror, r)
+    assert analytical.shape == r.shape
+    np.testing.assert_allclose(analytical.m_as('m'), 0.5, rtol=1e-14)
+    np.testing.assert_allclose(analytical.m_as('m'), generic.m_as('m'), rtol=1e-14)
 
 
 def test_mirror_parabolic_delegates_to_class():

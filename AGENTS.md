@@ -13,7 +13,7 @@ asset directory.
 
 ## Build, Test, and Development Commands
 
-Use Python 3.10 or newer in a virtual environment. Runtime dependencies are
+Use Python 3.12 or newer in a virtual environment. Runtime dependencies are
 installed with the package; use the `dev` extra for contributor tooling.
 
 - `python -m pip install -e ".[dev]"` installs the package and development tools
