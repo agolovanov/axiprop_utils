@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 import pint
 import pytest
+from pic_utils import PlasmaUnits
 
 from axiprop_utils import ParabolicMirror, mirror_parabolic, mirror_reflection
 from axiprop_utils.optical_elements import AxisymmetricMirror
@@ -37,6 +38,27 @@ def test_flat_minimum_nr():
             return np.zeros(r.shape)
 
     assert FlatMirror().minimum_nr(np.linspace(0, 1, 3) * ureg.m, k0=1) == 2
+
+
+@pytest.mark.parametrize('base_unit', ['wavelength', 'frequency', 'density'])
+def test_minimum_nr_plasma_units(base_unit):
+    """Equivalent PlasmaUnits inputs should give the same radial point count."""
+    units = PlasmaUnits(800 * ureg.nm)
+    mirror = ParabolicMirror(0.5 * ureg.m)
+    r = np.array([0, 1]) * ureg.mm
+    expected = mirror.minimum_nr(r, k0=units.wavenumber)
+
+    assert mirror.minimum_nr(r, k0=getattr(units, base_unit)) == expected
+    assert expected > 2
+
+
+def test_minimum_nr_wavelength_requires_scalar():
+    """Wavelength arrays should fail the scalar wavenumber validation."""
+    mirror = ParabolicMirror(0.5 * ureg.m)
+    r = np.array([0, 1]) * ureg.mm
+
+    with pytest.raises(ValueError, match='positive, finite scalar wavenumber'):
+        mirror.minimum_nr(r, k0=np.array([800, 900]) * ureg.nm)
 
 
 @pytest.mark.parametrize('k0', [np.pi, np.pi / ureg.m])

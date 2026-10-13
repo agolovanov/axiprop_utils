@@ -133,6 +133,8 @@ class AxisymmetricMirror(ABC):
             grid spans r[0] to r[-1], including both endpoints.
         k0 : float or pint.Quantity
             Positive central optical wavenumber, in inverse metres if unitless.
+            Also accepts wavelength, frequency, or density quantities supported
+            by pic_utils.PlasmaUnits, using their corresponding wavenumber.
         nyquist_threshold : float, optional
             Positive, finite phase-step limit in units of pi, default 1.
 
@@ -154,7 +156,14 @@ class AxisymmetricMirror(ABC):
         """
         if not np.isfinite(nyquist_threshold) or nyquist_threshold <= 0:
             raise ValueError('nyquist_threshold must be positive and finite')
-        k0_m = k0.m_as('1/m') if isinstance(k0, pint.Quantity) else k0
+        if isinstance(k0, pint.Quantity):
+            if not k0.check('[length] ** -1'):
+                from pic_utils import PlasmaUnits
+
+                k0 = PlasmaUnits(k0).wavenumber
+            k0_m = k0.m_as('1/m')
+        else:
+            k0_m = k0
         if np.ndim(k0_m) != 0 or not np.isfinite(k0_m) or k0_m <= 0:
             raise ValueError('k0 must be a positive, finite scalar wavenumber')
         r_m = np.asarray(r.m_as('m'))
