@@ -14,6 +14,113 @@ from axiprop_utils.pulse import create_gaussian_pulse
 ureg = pint.get_application_registry()
 
 
+@pytest.mark.parametrize('depth', [-0.1, 0.1])
+def test_intensity_on_axis_top_hat(depth):
+    """Uniform illumination gives the predicted plateau for either focal direction."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, depth * ureg.m, 20 * ureg.mm, 10 * ureg.mm)
+    z = np.linspace(0.11, 0.89, 79) * ureg.m
+    intensity = 2 * ureg('TW/cm**2')
+    k0 = 2 * np.pi / (800 * ureg.nm)
+    actual = mirror.intensity_on_axis(z, intensity, k0=k0, nr=10001)
+    plateau = (k0 * np.pi * mirror.beam_radius**2 * intensity / abs(mirror.focal_depth)).m_as('W/cm**2')
+    low, high = sorted([0.5, 0.5 + 4 * depth])
+    fraction = np.clip((np.minimum(z.m_as('m') + 0.005, high) - np.maximum(z.m_as('m') - 0.005, low)) / 0.01, 0, 1)
+    np.testing.assert_allclose(actual.m_as('W/cm**2'), plateau * fraction, rtol=1e-12, atol=plateau * 1e-12)
+
+
+def test_intensity_on_axis_sums_branches_and_conserves_power():
+    """Overlapping focal branches add and preserve total power."""
+
+    class FoldedMirror(ConstantIntensityAxiparabola):
+        def focal_distance(self, r):
+            return self.focal_length + self.focal_depth * np.abs(2 * (r / self.radius) ** 2 - 1)
+
+    mirror = FoldedMirror(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm)
+    z = np.linspace(0.48, 0.62, 29) * ureg.m
+    k0 = 1e7 / ureg.m
+    incident = 3 * ureg('W/cm**2')
+    actual = mirror.intensity_on_axis(z, incident, k0=k0, nr=10001)
+    edges = np.r_[0.4775, (z[:-1].magnitude + z[1:].magnitude) / 2, 0.6225]
+    fraction = np.maximum(0, np.minimum(edges[1:], 0.6) - np.maximum(edges[:-1], 0.5)) / np.diff(edges)
+    expected = k0 * np.pi * mirror.radius**2 * incident / mirror.focal_depth
+    np.testing.assert_allclose(actual.m_as('W/cm**2'), expected.m_as('W/cm**2') * fraction, rtol=1e-12)
+    recovered_power = np.sum(actual * np.diff(edges) * ureg.m / k0)
+    np.testing.assert_allclose(recovered_power.m_as('W'), (np.pi * mirror.radius**2 * incident).m_as('W'))
+
+
+def test_intensity_on_axis_fold_caustic():
+    """A smooth fold reproduces the integrable square-root ray density."""
+
+    class FoldedMirror(ConstantIntensityAxiparabola):
+        def focal_distance(self, r):
+            return self.focal_length + self.focal_depth * (2 * (r / self.radius) ** 2 - 1) ** 2
+
+    mirror = FoldedMirror(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm)
+    z = np.linspace(0.51, 0.59, 81) * ureg.m
+    incident = 1 * ureg('W/cm**2')
+    k0 = 1e7 / ureg.m
+    actual = mirror.intensity_on_axis(z, incident, k0=k0, nr=100001)
+    power = np.pi * mirror.radius**2 * incident
+    expected = k0 * power / (2 * np.sqrt(mirror.focal_depth * (z - mirror.focal_length)))
+    # Linear deposition smooths a curved density; dz / (z - f0) <= 0.1.
+    np.testing.assert_allclose(actual.m_as('W/cm**2'), expected.m_as('W/cm**2'), rtol=1e-3)
+
+
+def test_intensity_on_axis_envelope_profile_and_aperture():
+    """The radial peak profile and carrier come from the unmodified envelope."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 0.1 * ureg.m, 10 * ureg.mm)
+    envelope = create_gaussian_pulse(
+        800 * ureg.nm,
+        1 * ureg.J,
+        30 * ureg.fs,
+        8 * ureg.mm,
+        t_axis=np.linspace(-100, 100, 65) * ureg.fs,
+        r_axis=np.linspace(0, 20, 1001) * ureg.mm,
+    )
+    original = envelope.Field.copy()
+    z = np.linspace(0.502, 0.598, 49) * ureg.m
+    actual = mirror.intensity_on_axis(z, envelope, nr=20001)
+    # Linear deposition applies a triangular kernel to the exponential profile.
+    conversion = (ureg.speed_of_light * ureg.vacuum_permittivity * (ureg.V / ureg.m) ** 2 / 2).m_as('W/m**2')
+    incident = conversion * np.max(np.abs(envelope.Field[:, 0]) ** 2)
+    rate = 2 * (mirror.radius / (8 * ureg.mm)).m_as('') ** 2 / mirror.focal_depth.m_as('m')
+    dz = (z[1] - z[0]).m_as('m')
+    mean_profile = np.exp(-rate * (z.m_as('m') - 0.5)) * (np.sinh(rate * dz / 2) / (rate * dz / 2)) ** 2
+    expected = envelope.k0 * np.pi * mirror.radius.m_as('m') ** 2 / 0.1 * incident * mean_profile
+    np.testing.assert_allclose(actual.m_as('W/m**2'), expected, rtol=3e-5)
+    outside = mirror.intensity_on_axis(np.array([0.61, 0.62]) * ureg.m, envelope)
+    np.testing.assert_array_equal(outside.magnitude, 0)
+    np.testing.assert_array_equal(envelope.Field, original)
+
+
+@pytest.mark.parametrize(
+    ('z', 'incident', 'kwargs', 'message'),
+    [
+        (np.array([0.5]), 1, {'k0': 1e7}, 'at least two'),
+        (np.array([0.6, 0.5]), 1, {'k0': 1e7}, 'strictly increasing'),
+        (np.array([0.5, np.nan]), 1, {'k0': 1e7}, 'finite'),
+        (np.array([0.5, 0.51, 0.6]), 1, {'k0': 1e7}, 'uniformly spaced'),
+        (np.array([0.5, 0.6]), 1, {}, 'k0 is required'),
+        (np.array([0.5, 0.6]), 1, {'k0': 1e7, 'nr': None}, 'nr is required'),
+        (np.array([0.5, 0.6]), 1, {'k0': -1}, 'wavenumber'),
+        (np.array([0.5, 0.6]), -1, {'k0': 1e7}, 'non-negative'),
+        (np.array([0.5, 0.6]), 1, {'k0': 1e7, 'nr': 1}, 'nr'),
+    ],
+)
+def test_intensity_on_axis_validation(z, incident, kwargs, message):
+    """Ambiguous bin grids and invalid illumination should fail explicitly."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm)
+    with pytest.raises(ValueError, match=message):
+        mirror.intensity_on_axis(z * ureg.m, incident * ureg('W/cm**2'), **({'nr': 10001} | kwargs))
+
+
+def test_intensity_on_axis_rejects_collapsed_focal_line():
+    """A parabolic limit cannot be predicted using the stationary-phase density."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 0 * ureg.m, 20 * ureg.mm)
+    with pytest.raises(ValueError, match='diffraction'):
+        mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7, nr=10001)
+
+
 def test_axiparabola_reduces_to_parabolic_mirror():
     """An axiparabola with zero focal depth should be parabolic."""
     wavelength = 800 * ureg.nm

@@ -14,6 +14,77 @@ from axiprop_utils.pulse import create_gaussian_pulse
 ureg = pint.get_application_registry()
 
 
+@pytest.fixture
+def focal_map_mirror():
+    """Provide an aperture-free mirror to exercise the generic focal-map API."""
+
+    class FocalMapMirror(AxisymmetricMirror):
+        def sag(self, r):
+            raise AssertionError('Intensity reconstruction should use only focal_distance')
+
+        def _H_func(self, r):
+            raise AssertionError('Intensity reconstruction should use only focal_distance')
+
+        def focal_distance(self, r):
+            return 0.5 * ureg.m + 0.1 * ureg.m * (r / (20 * ureg.mm)) ** 2
+
+    return FocalMapMirror()
+
+
+def test_intensity_on_axis_generic_mirror(focal_map_mirror):
+    """A mirror without a stored aperture accepts an explicit illuminated radius."""
+    radius = 20 * ureg.mm
+    incident = 1 * ureg('W/cm**2')
+    k0 = 1e7 / ureg.m
+    z = np.linspace(0.51, 0.59, 9) * ureg.m
+    actual = focal_map_mirror.intensity_on_axis(z, incident, k0=k0, radius=radius, nr=10001)
+    expected = k0 * np.pi * radius**2 * incident / (0.1 * ureg.m)
+    np.testing.assert_allclose(actual.m_as('W/cm**2'), expected.m_as('W/cm**2'), rtol=1e-12)
+
+
+def test_intensity_on_axis_generic_envelope(focal_map_mirror):
+    """Envelope coordinates supply the aperture for a mirror without a radius."""
+    envelope = create_gaussian_pulse(
+        800 * ureg.nm,
+        1 * ureg.J,
+        30 * ureg.fs,
+        8 * ureg.mm,
+        t_axis=np.linspace(-100, 100, 65) * ureg.fs,
+        r_axis=np.linspace(0, 20, 101) * ureg.mm,
+    )
+    z = np.linspace(0.49, 0.61, 25) * ureg.m
+    reference = ConstantIntensityAxiparabola(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm)
+    np.testing.assert_allclose(
+        focal_map_mirror.intensity_on_axis(z, envelope).magnitude,
+        reference.intensity_on_axis(z, envelope).magnitude,
+        rtol=1e-12,
+    )
+    clipped = focal_map_mirror.intensity_on_axis(z, envelope, radius=10 * ureg.mm)
+    assert np.all(clipped[z > 0.53 * ureg.m].magnitude == 0)
+
+
+def test_intensity_on_axis_requires_illumination_extent(focal_map_mirror):
+    """Constant illumination requires an aperture for an unbounded mirror."""
+    with pytest.raises(ValueError, match='radius is required'):
+        focal_map_mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7)
+
+
+@pytest.mark.parametrize('radius', [0 * ureg.mm, -1 * ureg.mm, np.nan * ureg.mm, np.array([10]) * ureg.mm])
+def test_intensity_on_axis_invalid_radius(focal_map_mirror, radius):
+    """Illuminated radii must be positive finite scalar lengths."""
+    with pytest.raises(ValueError, match='radius'):
+        focal_map_mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7, radius=radius)
+
+
+def test_parabolic_intensity_requires_diffraction():
+    """The generic method rejects the collapsed focal map of a parabola."""
+    mirror = ParabolicMirror(0.5 * ureg.m)
+    with pytest.raises(ValueError, match='diffraction'):
+        mirror.intensity_on_axis(
+            np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7, radius=20 * ureg.mm, nr=10001
+        )
+
+
 @pytest.fixture(params=[None, -0.1, 0, 0.1])
 def ray_mirror(request):
     """Provide a parabola and axiparabolas with both signs of focal depth."""

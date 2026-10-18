@@ -264,6 +264,135 @@ class AxisymmetricMirror(ABC):
         """
         return 1 / self._H_func(r) - self.focal_distance(r)
 
+    def intensity_on_axis(
+        self,
+        z: Quantity,
+        scl: Quantity | ScalarFieldEnvelope,
+        *,
+        k0: Quantity | float | None = None,
+        radius: Quantity | None = None,
+        nr: int | None = None,
+    ) -> Quantity:
+        """Estimate the on-axis intensity from the incident beam.
+
+        Parameters
+        ----------
+        z : pint.Quantity of shape (N_z,)
+            Uniformly spaced, strictly increasing longitudinal coordinates
+            relative to the mirror vertex. At least two points are required.
+        scl : pint.Quantity or ScalarFieldEnvelope
+            Constant incident intensity, or an axisymmetric incident envelope.
+            For an envelope, use the temporal maximum of intensity at each
+            radius. The mirror aperture clips the incident beam.
+        k0 : pint.Quantity or float, optional
+            Positive carrier wavenumber (inverse metres if unitless). Required
+            for constant intensity; defaults to the envelope's carrier otherwise.
+        radius : pint.Quantity, optional
+            Positive illuminated radius, clipped to the mirror's radius when
+            defined. Defaults to the mirror radius, or the envelope's radial
+            extent for mirrors without a radius. Required for constant intensity
+            when the mirror has no radius.
+        nr : int, optional
+            Number of radial points, uniform in squared radius. Required for
+            constant illumination. For an envelope, defaults to its radial grid;
+            supply nr to resample it. Refine sampling to check convergence.
+
+        Returns
+        -------
+        pint.Quantity of shape (N_z,)
+            Estimated intensity in W/cm**2 on the supplied grid.
+
+        Notes
+        -----
+        Deposit powers using trapezoidal weights for ``pi * I(r) * d(r**2)``
+        at the original radii's focal positions with
+        pic_utils.functions.density_1d, then multiply by k0.
+        Linear deposition sums all focal branches and smooths over one z grid
+        spacing. Sum(I_axis) * dz / k0 recovers the sampled incident power when
+        the grid includes the full deposition support.
+
+        This stationary-phase estimate ignores interference, pulse timing, and
+        diffraction at caustics. Collapsed focal lines require diffraction.
+        """
+        from axiprop.containers import ScalarFieldEnvelope
+        from pic_utils.functions import density_1d
+
+        z_m = np.asarray(z.m_as('m'))
+        if z_m.ndim != 1 or z_m.size < 2:
+            raise ValueError('z must be one-dimensional with at least two bin centers')
+        if not np.all(np.isfinite(z_m)) or np.any(np.diff(z_m) <= 0):
+            raise ValueError('z must be finite and strictly increasing')
+        if not np.allclose(np.diff(z_m), z_m[1] - z_m[0], rtol=1e-10, atol=0):
+            raise ValueError('z must be uniformly spaced')
+        if nr is not None and (isinstance(nr, (bool, np.bool_)) or not isinstance(nr, (int, np.integer)) or nr < 2):
+            raise ValueError('nr must be an integer of at least two')
+
+        mirror_radius = getattr(self, 'radius', None)
+        radius_m = None
+        for aperture in (mirror_radius, radius):
+            if aperture is None:
+                continue
+            aperture_m = aperture.m_as('m')
+            if np.ndim(aperture_m) != 0 or not np.isfinite(aperture_m) or aperture_m <= 0:
+                raise ValueError('radius must be a positive, finite scalar length')
+            radius_m = aperture_m if radius_m is None else min(radius_m, aperture_m)
+        if isinstance(scl, ScalarFieldEnvelope):
+            if scl.Field.ndim != 2:
+                raise ValueError('scl must be an axisymmetric envelope')
+            source_r = np.asarray(scl.r)
+            if (
+                source_r.ndim != 1
+                or source_r.size < 2
+                or not np.all(np.isfinite(source_r))
+                or np.any(source_r < 0)
+                or np.any(np.diff(source_r) <= 0)
+            ):
+                raise ValueError('The envelope radial grid must be finite, non-negative, and strictly increasing')
+            if k0 is None:
+                k0 = scl.k0
+            # Sample only illuminated radii; avoid interpolating across a hard
+            # aperture or across the boundary of the envelope's radial domain.
+            r_min = source_r[0]
+            r_max = source_r[-1] if radius_m is None else min(radius_m, source_r[-1])
+            if r_min >= r_max:
+                return np.zeros(z_m.shape) * ureg('W/cm**2')
+            if nr is None:
+                r_m = np.append(source_r[source_r < r_max], r_max)
+            else:
+                r_m = np.sqrt(np.linspace(r_min**2, r_max**2, nr))
+            conversion = (ureg.speed_of_light * ureg.vacuum_permittivity * (ureg.V / ureg.m) ** 2 / 2).m_as('W/m**2')
+            incident = np.interp(r_m, source_r, conversion * np.max(np.abs(scl.Field) ** 2, axis=0))
+        elif isinstance(scl, pint.Quantity):
+            intensity = np.asarray(scl.m_as('W/m**2'))
+            if intensity.ndim != 0:
+                raise ValueError('Constant incident intensity must be scalar')
+            if k0 is None:
+                raise ValueError('k0 is required for a constant incident intensity')
+            if radius_m is None:
+                raise ValueError('radius is required for constant intensity when the mirror has no radius')
+            if nr is None:
+                raise ValueError('nr is required for constant incident intensity')
+            r_m = np.sqrt(np.linspace(0, radius_m**2, nr))
+            incident = np.full(nr, intensity)
+        else:
+            raise TypeError('scl must be an intensity quantity or a ScalarFieldEnvelope')
+
+        k0_m = k0.m_as('1/m') if isinstance(k0, pint.Quantity) else k0
+        if np.ndim(k0_m) != 0 or not np.isfinite(k0_m) or k0_m <= 0:
+            raise ValueError('k0 must be a positive, finite scalar wavenumber')
+        if not np.all(np.isfinite(incident)) or np.any(incident < 0):
+            raise ValueError('Incident intensity must be finite and non-negative')
+        focal_m = np.asarray(self.focal_distance(r_m * ureg.m).m_as('m'))
+        if focal_m.shape != r_m.shape or not np.all(np.isfinite(focal_m)):
+            raise ValueError('focal_distance must return one finite value per radius')
+        if np.ptp(focal_m) == 0:
+            raise ValueError('A collapsed focal line requires a diffraction calculation')
+
+        area = np.pi * np.diff(r_m**2)
+        power = incident * (np.r_[0, area] + np.r_[area, 0]) / 2
+        density = density_1d(focal_m, power, z_m)
+        return (k0_m * density * ureg('W/m**2')).to('W/cm**2')
+
     def ray_radius(self, z: Quantity, r0: Quantity) -> Quantity:
         """Evaluate the signed radius along a reflected ray.
 
