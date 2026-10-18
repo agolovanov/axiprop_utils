@@ -269,7 +269,7 @@ class AxisymmetricMirror(ABC):
         z: Quantity,
         scl: Quantity | ScalarFieldEnvelope,
         *,
-        k0: Quantity | float | None = None,
+        k0: Quantity | None = None,
         radius: Quantity | None = None,
         nr: int | None = None,
     ) -> Quantity:
@@ -284,8 +284,8 @@ class AxisymmetricMirror(ABC):
             Constant incident intensity, or an axisymmetric incident envelope.
             For an envelope, use the temporal maximum of intensity at each
             radius. The mirror aperture clips the incident beam.
-        k0 : pint.Quantity or float, optional
-            Positive carrier wavenumber (inverse metres if unitless). Required
+        k0 : pint.Quantity, optional
+            Positive carrier wavenumber in inverse-length units. Required
             for constant intensity; defaults to the envelope's carrier otherwise.
         radius : pint.Quantity, optional
             Positive illuminated radius, clipped to the mirror's radius when
@@ -317,6 +317,8 @@ class AxisymmetricMirror(ABC):
         from axiprop.containers import ScalarFieldEnvelope
         from pic_utils.functions import density_1d
 
+        if k0 is not None and not isinstance(k0, pint.Quantity):
+            raise TypeError('k0 must be a pint.Quantity with inverse-length units')
         z_m = np.asarray(z.m_as('m'))
         if z_m.ndim != 1 or z_m.size < 2:
             raise ValueError('z must be one-dimensional with at least two bin centers')
@@ -349,7 +351,7 @@ class AxisymmetricMirror(ABC):
             ):
                 raise ValueError('The envelope radial grid must be finite, non-negative, and strictly increasing')
             if k0 is None:
-                k0 = scl.k0
+                k0 = scl.k0 / ureg.m
             # Sample only illuminated radii; avoid interpolating across a hard
             # aperture or across the boundary of the envelope's radial domain.
             r_min = source_r[0]
@@ -377,7 +379,7 @@ class AxisymmetricMirror(ABC):
         else:
             raise TypeError('scl must be an intensity quantity or a ScalarFieldEnvelope')
 
-        k0_m = k0.m_as('1/m') if isinstance(k0, pint.Quantity) else k0
+        k0_m = k0.m_as('1/m')
         if np.ndim(k0_m) != 0 or not np.isfinite(k0_m) or k0_m <= 0:
             raise ValueError('k0 must be a positive, finite scalar wavenumber')
         if not np.all(np.isfinite(incident)) or np.any(incident < 0):
@@ -392,6 +394,48 @@ class AxisymmetricMirror(ABC):
         power = incident * (np.r_[0, area] + np.r_[area, 0]) / 2
         density = density_1d(focal_m, power, z_m)
         return (k0_m * density * ureg('W/m**2')).to('W/cm**2')
+
+    def a0_on_axis(
+        self,
+        z: Quantity,
+        scl: Quantity | ScalarFieldEnvelope,
+        *,
+        k0: Quantity | None = None,
+        radius: Quantity | None = None,
+        nr: int | None = None,
+    ) -> np.ndarray:
+        """Estimate the on-axis normalized vector potential.
+
+        Parameters
+        ----------
+        z : pint.Quantity of shape (N_z,)
+            Uniform longitudinal grid, as for intensity_on_axis.
+        scl : pint.Quantity or ScalarFieldEnvelope
+            Incident intensity or envelope, as for intensity_on_axis.
+        k0 : pint.Quantity, optional
+            Carrier wavenumber in inverse-length units. Defaults to the
+            envelope's carrier; required for constant incident intensity.
+        radius : pint.Quantity, optional
+            Illuminated radius, as for intensity_on_axis.
+        nr : int, optional
+            Radial point count, as for intensity_on_axis.
+
+        Returns
+        -------
+        np.ndarray of shape (N_z,)
+            Dimensionless amplitude ``a0 = e * E / (m_e * c**2 * k0)``,
+            with ``E = sqrt(2 * I_axis / (epsilon_0 * c))``.
+
+        Notes
+        -----
+        Shares the approximations and sampling of intensity_on_axis.
+        """
+        intensity = self.intensity_on_axis(z, scl, k0=k0, radius=radius, nr=nr)
+        if k0 is None:
+            k0 = scl.k0 / ureg.m
+        c = ureg.speed_of_light
+        field = np.sqrt(2 * intensity / (ureg.vacuum_permittivity * c))
+        return (ureg.elementary_charge * field / (ureg.electron_mass * c**2 * k0)).m_as('')
 
     def ray_radius(self, z: Quantity, r0: Quantity) -> Quantity:
         """Evaluate the signed radius along a reflected ray.

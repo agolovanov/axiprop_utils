@@ -96,15 +96,15 @@ def test_intensity_on_axis_envelope_profile_and_aperture():
 @pytest.mark.parametrize(
     ('z', 'incident', 'kwargs', 'message'),
     [
-        (np.array([0.5]), 1, {'k0': 1e7}, 'at least two'),
-        (np.array([0.6, 0.5]), 1, {'k0': 1e7}, 'strictly increasing'),
-        (np.array([0.5, np.nan]), 1, {'k0': 1e7}, 'finite'),
-        (np.array([0.5, 0.51, 0.6]), 1, {'k0': 1e7}, 'uniformly spaced'),
+        (np.array([0.5]), 1, {'k0': 1e7 / ureg.m}, 'at least two'),
+        (np.array([0.6, 0.5]), 1, {'k0': 1e7 / ureg.m}, 'strictly increasing'),
+        (np.array([0.5, np.nan]), 1, {'k0': 1e7 / ureg.m}, 'finite'),
+        (np.array([0.5, 0.51, 0.6]), 1, {'k0': 1e7 / ureg.m}, 'uniformly spaced'),
         (np.array([0.5, 0.6]), 1, {}, 'k0 is required'),
-        (np.array([0.5, 0.6]), 1, {'k0': 1e7, 'nr': None}, 'nr is required'),
-        (np.array([0.5, 0.6]), 1, {'k0': -1}, 'wavenumber'),
-        (np.array([0.5, 0.6]), -1, {'k0': 1e7}, 'non-negative'),
-        (np.array([0.5, 0.6]), 1, {'k0': 1e7, 'nr': 1}, 'nr'),
+        (np.array([0.5, 0.6]), 1, {'k0': 1e7 / ureg.m, 'nr': None}, 'nr is required'),
+        (np.array([0.5, 0.6]), 1, {'k0': -1 / ureg.m}, 'wavenumber'),
+        (np.array([0.5, 0.6]), -1, {'k0': 1e7 / ureg.m}, 'non-negative'),
+        (np.array([0.5, 0.6]), 1, {'k0': 1e7 / ureg.m, 'nr': 1}, 'nr'),
     ],
 )
 def test_intensity_on_axis_validation(z, incident, kwargs, message):
@@ -118,7 +118,7 @@ def test_intensity_on_axis_rejects_collapsed_focal_line():
     """A parabolic limit cannot be predicted using the stationary-phase density."""
     mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 0 * ureg.m, 20 * ureg.mm)
     with pytest.raises(ValueError, match='diffraction'):
-        mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7, nr=10001)
+        mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7 / ureg.m, nr=10001)
 
 
 def test_axiparabola_reduces_to_parabolic_mirror():

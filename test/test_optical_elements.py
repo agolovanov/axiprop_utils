@@ -63,17 +63,56 @@ def test_intensity_on_axis_generic_envelope(focal_map_mirror):
     assert np.all(clipped[z > 0.53 * ureg.m].magnitude == 0)
 
 
+@pytest.mark.parametrize('unit', ['1/m', '1/cm'])
+def test_a0_on_axis_normalization(focal_map_mirror, unit):
+    """Illumination giving the unit laser field should yield a0 of one."""
+    laser = PlasmaUnits(800 * ureg.nm)
+    radius = 20 * ureg.mm
+    unit_intensity = ureg.vacuum_permittivity * ureg.speed_of_light * laser.E**2 / 2
+    gain = laser.wavenumber * np.pi * radius**2 / (0.1 * ureg.m)
+    k0 = laser.wavenumber.to(unit)
+    z = np.linspace(0.51, 0.59, 9) * ureg.m
+    actual = focal_map_mirror.a0_on_axis(z, unit_intensity / gain, k0=k0, radius=radius, nr=10001)
+    assert isinstance(actual, np.ndarray)
+    np.testing.assert_allclose(actual, 1, rtol=1e-12)
+
+
+def test_a0_on_axis_envelope(focal_map_mirror):
+    """Envelope conversion uses its carrier and preserves intensity scaling."""
+    envelope = create_gaussian_pulse(
+        800 * ureg.nm,
+        1 * ureg.J,
+        30 * ureg.fs,
+        8 * ureg.mm,
+        t_axis=np.linspace(-100, 100, 65) * ureg.fs,
+        r_axis=np.linspace(0, 20, 101) * ureg.mm,
+    )
+    z = np.linspace(0.49, 0.61, 25) * ureg.m
+    amplitude = focal_map_mirror.a0_on_axis(z, envelope)
+    laser = PlasmaUnits(800 * ureg.nm)
+    recovered = amplitude**2 * ureg.vacuum_permittivity * ureg.speed_of_light * laser.E**2 / 2
+    np.testing.assert_allclose(
+        recovered.m_as('W/cm**2'),
+        focal_map_mirror.intensity_on_axis(z, envelope).m_as('W/cm**2'),
+        rtol=1e-12,
+    )
+    envelope.Field *= 2
+    np.testing.assert_allclose(focal_map_mirror.a0_on_axis(z, envelope), 2 * amplitude, rtol=1e-12)
+
+
 def test_intensity_on_axis_requires_illumination_extent(focal_map_mirror):
     """Constant illumination requires an aperture for an unbounded mirror."""
     with pytest.raises(ValueError, match='radius is required'):
-        focal_map_mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7)
+        focal_map_mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7 / ureg.m)
 
 
 @pytest.mark.parametrize('radius', [0 * ureg.mm, -1 * ureg.mm, np.nan * ureg.mm, np.array([10]) * ureg.mm])
 def test_intensity_on_axis_invalid_radius(focal_map_mirror, radius):
     """Illuminated radii must be positive finite scalar lengths."""
     with pytest.raises(ValueError, match='radius'):
-        focal_map_mirror.intensity_on_axis(np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7, radius=radius)
+        focal_map_mirror.intensity_on_axis(
+            np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7 / ureg.m, radius=radius
+        )
 
 
 def test_parabolic_intensity_requires_diffraction():
@@ -81,7 +120,7 @@ def test_parabolic_intensity_requires_diffraction():
     mirror = ParabolicMirror(0.5 * ureg.m)
     with pytest.raises(ValueError, match='diffraction'):
         mirror.intensity_on_axis(
-            np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7, radius=20 * ureg.mm, nr=10001
+            np.array([0.5, 0.6]) * ureg.m, 1 * ureg('W/cm**2'), k0=1e7 / ureg.m, radius=20 * ureg.mm, nr=10001
         )
 
 
