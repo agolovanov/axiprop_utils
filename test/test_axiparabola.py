@@ -1,5 +1,7 @@
 """Tests for axiparabola optics."""
 
+from unittest.mock import patch
+
 import numpy as np
 import pint
 import pytest
@@ -107,6 +109,120 @@ def test_axiparabola_sag_starts_at_vertex():
     assert np.all(np.diff(sag) > 0)
 
 
+def test_sag_cache_reuses_equal_grids_and_protects_values():
+    """Equivalent grids should reuse the solve despite input or output mutation."""
+    from scipy.integrate import solve_ivp
+
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 10 * ureg.cm, 20 * ureg.mm)
+    r = np.linspace(0, 20, 101) * ureg.mm
+    original_r = r.copy()
+    with patch('scipy.integrate.solve_ivp', wraps=solve_ivp) as solver:
+        sag = mirror.sag(r)
+        expected = sag.copy()
+        sag.magnitude[:] = -1
+        r.magnitude[:] = -1
+        repeated = mirror.sag(original_r.to('m'))
+        np.testing.assert_array_equal(repeated.magnitude, expected.magnitude)
+        repeated.magnitude[:] = -2
+        np.testing.assert_array_equal(mirror.sag(original_r.copy()).magnitude, expected.magnitude)
+        assert solver.call_count == 1
+
+
+@pytest.mark.parametrize('depth', [-0.1, 0, 0.1])
+def test_sag_cache_interpolates_contained_radii(depth):
+    """A sparse initial grid should support accurate reuse at arbitrary radii."""
+    from scipy.integrate import solve_ivp
+
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, depth * ureg.m, 20 * ureg.mm)
+    queries = [
+        np.linspace(0, 20, 301) * ureg.mm,
+        7 * ureg.mm,
+        np.array([7]) * ureg.mm,
+    ]
+    expected = [
+        ConstantIntensityAxiparabola(mirror.focal_length, mirror.focal_depth, mirror.radius).sag(r) for r in queries
+    ]
+    with patch('scipy.integrate.solve_ivp', wraps=solve_ivp) as solver:
+        mirror.sag(np.array([1, 20]) * ureg.mm)
+        for r, reference in zip(queries, expected, strict=True):
+            actual = mirror.sag(r)
+            assert np.shape(actual.magnitude) == np.shape(r.magnitude)
+            assert actual.units == ureg.m
+            np.testing.assert_allclose(actual.magnitude, reference.magnitude, rtol=1e-10, atol=2e-16)
+        assert solver.call_count == 1
+
+
+def test_sag_cache_extends_range():
+    """Larger ranges should be solved once and then support previous grids."""
+    from scipy.integrate import solve_ivp
+
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 10 * ureg.cm, 20 * ureg.mm)
+    r = np.linspace(0, 10, 51) * ureg.mm
+    with patch('scipy.integrate.solve_ivp', wraps=solve_ivp) as solver:
+        initial = mirror.sag(r)
+        mirror.sag(np.linspace(0, 20, 101) * ureg.mm)
+        assert solver.call_count == 2
+        np.testing.assert_allclose(mirror.sag(r).magnitude, initial.magnitude, rtol=1e-10, atol=2e-16)
+        assert solver.call_count == 2
+
+
+@pytest.mark.parametrize('name', ['focal_length', 'focal_depth', 'radius', 'beam_radius'])
+def test_axiparabola_parameters_are_read_only(name):
+    """Inputs and retrieved quantities should not alter the stored parameters."""
+    parameters = {
+        'focal_length': ureg.Quantity(np.array(50.0), 'cm'),
+        'focal_depth': ureg.Quantity(np.array(10.0), 'cm'),
+        'radius': ureg.Quantity(np.array(20.0), 'mm'),
+        'beam_radius': ureg.Quantity(np.array(20.0), 'mm'),
+    }
+    mirror = ConstantIntensityAxiparabola(**parameters)
+    original = getattr(mirror, name)
+
+    parameters[name].magnitude[...] *= 2
+    retrieved = getattr(mirror, name)
+    retrieved.ito('m')
+    retrieved *= 2
+
+    assert getattr(mirror, name) == original
+    assert getattr(mirror, name).units == original.units
+    with pytest.raises(AttributeError):
+        setattr(mirror, name, retrieved)
+
+
+def test_default_beam_radius_is_immutable():
+    """The default beam radius should be independent of the supplied radius."""
+    radius = ureg.Quantity(np.array(20.0), 'mm')
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 10 * ureg.cm, radius)
+    radius.magnitude[...] = 10
+    assert mirror.radius == 20 * ureg.mm
+    assert mirror.beam_radius == 20 * ureg.mm
+
+
+def test_axiparabola_parameters_must_be_scalar():
+    """Array parameters should be rejected rather than silently converted."""
+    with pytest.raises(ValueError, match='scalar'):
+        ConstantIntensityAxiparabola(np.array([0.5]) * ureg.m, 10 * ureg.cm, 20 * ureg.mm)
+
+
+@pytest.mark.parametrize(
+    'r',
+    [
+        -1 * ureg.mm,
+        np.nan * ureg.mm,
+        21 * ureg.mm,
+        np.array([2, 1]) * ureg.mm,
+        np.array([1, 1]) * ureg.mm,
+        np.array([[1, 2]]) * ureg.mm,
+    ],
+)
+def test_sag_cache_preserves_validation(r):
+    """Cached solutions should still reject invalid scalar and array queries."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 10 * ureg.cm, 20 * ureg.mm)
+    mirror.sag(np.linspace(0, 20, 101) * ureg.mm)
+    with pytest.raises(ValueError):
+        mirror.sag(r)
+
+
 @pytest.mark.parametrize(
     ('focal_length', 'focal_depth', 'radius', 'message'),
     [
@@ -130,21 +246,6 @@ def test_axiparabola_requires_positive_focal_distance_at_mirror_edge():
             radius=20 * ureg.mm,
             beam_radius=10 * ureg.mm,
         )
-
-
-@pytest.mark.parametrize(
-    'r',
-    [
-        np.array([0, 2, 1]) * ureg.mm,
-        np.array([0, 1, 1]) * ureg.mm,
-    ],
-)
-def test_axiparabola_requires_strictly_increasing_radius(r):
-    """The radial grid should be ordered and contain no duplicates."""
-    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 10 * ureg.cm, 20 * ureg.mm)
-
-    with pytest.raises(ValueError, match='strictly increasing'):
-        mirror.sag(r)
 
 
 def test_constant_velocity_phase_is_axiparabola_method():

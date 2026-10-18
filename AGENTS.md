@@ -35,6 +35,11 @@ where they improve public API clarity. Preserve physical units with
 library boundaries. Keep public imports intentional when exposing helpers from
 `axiprop_utils`.
 
+Overridden methods should normally inherit the base method's docstring. Do not
+add or rewrite an override docstring unless there is a good reason, such as a
+change in the public contract, assumptions, or limitations that callers need to
+know. Implementation details alone do not justify an override docstring.
+
 ## Testing Guidelines
 
 Tests use pytest and NumPy assertions. Name files `test_*.py` and test functions

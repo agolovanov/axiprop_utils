@@ -1,6 +1,6 @@
 [project]
 name = "axiprop_utils"
-version = "0.13.0"
+version = "0.13.1"
 description = "Helper functions for the Axiprop code"
 authors = [{ name = "Anton Golovanov" }]
 requires-python = ">=3.12"

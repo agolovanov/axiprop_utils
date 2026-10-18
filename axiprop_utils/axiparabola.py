@@ -2,7 +2,6 @@
 
 import typing
 import warnings
-from dataclasses import dataclass
 
 import numpy as np
 import pint
@@ -16,7 +15,6 @@ if typing.TYPE_CHECKING:
     from pint import Quantity
 
 
-@dataclass(frozen=True)
 class ConstantIntensityAxiparabola(AxisymmetricMirror):
     """Axiparabola designed to produce a constant on-axis intensity.
 
@@ -35,20 +33,54 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         Mirror radius.
     beam_radius : pint.Quantity, optional
         Radius of the beam on the mirror corresponding to the desired focal depth. If not provided, the mirror radius is used.
+
+    Notes
+    -----
+    Mirror parameters are read-only.
     """
 
-    focal_length: 'Quantity'
-    focal_depth: 'Quantity'
-    radius: 'Quantity'
-    beam_radius: 'Quantity' = None
+    def __init__(
+        self,
+        focal_length: 'Quantity',
+        focal_depth: 'Quantity',
+        radius: 'Quantity',
+        beam_radius: 'Quantity' = None,
+    ):
+        parameters = (focal_length, focal_depth, radius, radius if beam_radius is None else beam_radius)
+        if any(np.ndim(value.magnitude) != 0 for value in parameters):
+            raise ValueError('Mirror parameters must be scalar')
+        self._focal_length = focal_length.copy()
+        self._focal_depth = focal_depth.copy()
+        self._radius = radius.copy()
+        self._beam_radius = (radius if beam_radius is None else beam_radius).copy()
+        self._sag_cache: tuple | None = None
+        self._validate_parameters()
 
-    def __post_init__(self):
+    @property
+    def focal_length(self) -> 'Quantity':
+        """Distance from the mirror vertex to the start of the focal line."""
+        return self._focal_length.copy()
+
+    @property
+    def focal_depth(self) -> 'Quantity':
+        """Length of the focal line."""
+        return self._focal_depth.copy()
+
+    @property
+    def radius(self) -> 'Quantity':
+        """Mirror radius."""
+        return self._radius.copy()
+
+    @property
+    def beam_radius(self) -> 'Quantity':
+        """Beam radius on the mirror corresponding to the desired focal depth."""
+        return self._beam_radius.copy()
+
+    def _validate_parameters(self):
         """Validate the mirror parameters."""
         focal_length_m = self.focal_length.m_as('m')
         focal_depth_m = self.focal_depth.m_as('m')
         radius_m = self.radius.m_as('m')
-        if self.beam_radius is None:
-            object.__setattr__(self, 'beam_radius', self.radius)
         beam_radius_m = self.beam_radius.m_as('m')
 
         if not np.all(np.isfinite([focal_length_m, focal_depth_m, radius_m, beam_radius_m])):
@@ -69,14 +101,15 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
     def sag(self, r: 'Quantity') -> 'Quantity':
         from scipy.integrate import solve_ivp
 
-        r_m = np.asarray(r.m_as('m'))
+        r_values = np.asarray(r.m_as('m'))
+        r_m = np.atleast_1d(r_values)
         focal_length_m = self.focal_length.m_as('m')
         focal_depth_m = self.focal_depth.m_as('m')
         radius_m = self.radius.m_as('m')
         beam_radius_m = self.beam_radius.m_as('m')
 
         if r_m.ndim != 1:
-            raise ValueError('r must be one-dimensional')
+            raise ValueError('r must be scalar or one-dimensional')
         if not np.all(np.isfinite(r_m)):
             raise ValueError('r must contain only finite values')
         if np.any(r_m < 0):
@@ -88,7 +121,17 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         if np.max(r_m) > radius_m * (1 + 1e-12):
             raise ValueError('r cannot extend beyond the mirror radius')
         if np.max(r_m) == 0:
-            return np.zeros_like(r_m) * ureg.m
+            return np.zeros_like(r_values) * ureg.m
+
+        cache = self._sag_cache
+        if cache is not None:
+            cached_radius, cached_r, cached_sag, interpolant = cache
+            if np.array_equal(r_m, cached_r):
+                return cached_sag.copy().reshape(r_values.shape) * ureg.m
+            if r_m[-1] <= cached_radius:
+                sag_m = interpolant(r_m)[0]
+                self._sag_cache = (cached_radius, r_m.copy(), sag_m.copy(), interpolant)
+                return sag_m.reshape(r_values.shape) * ureg.m
 
         def sag_equation(radial_coordinate, sag):
             focal_distance = focal_length_m + focal_depth_m * (radial_coordinate / beam_radius_m) ** 2
@@ -101,6 +144,7 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             (0, r_m[-1]),
             [0.0],
             t_eval=r_m,
+            dense_output=True,
             method='DOP853',
             rtol=1e-13,
             atol=1e-16,
@@ -108,7 +152,8 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         if not solution.success:
             raise RuntimeError(f'Failed to calculate axiparabola sag: {solution.message}')
 
-        return solution.y[0] * ureg.m
+        self._sag_cache = (float(r_m[-1]), r_m.copy(), solution.y[0].copy(), solution.sol)
+        return solution.y[0].reshape(r_values.shape) * ureg.m
 
     @typing.override
     def _H_func(self, r: 'Quantity') -> 'Quantity':
