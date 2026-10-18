@@ -7,11 +7,68 @@ import pint
 import pytest
 from pic_utils import PlasmaUnits
 
-from axiprop_utils import ParabolicMirror, mirror_parabolic, mirror_reflection
+from axiprop_utils import ConstantIntensityAxiparabola, ParabolicMirror, mirror_parabolic, mirror_reflection
 from axiprop_utils.optical_elements import AxisymmetricMirror
 from axiprop_utils.pulse import create_gaussian_pulse
 
 ureg = pint.get_application_registry()
+
+
+@pytest.fixture(params=[None, -0.1, 0, 0.1])
+def ray_mirror(request):
+    """Provide a parabola and axiparabolas with both signs of focal depth."""
+    if request.param is None:
+        return ParabolicMirror(50 * ureg.cm)
+    return ConstantIntensityAxiparabola(50 * ureg.cm, request.param * ureg.m, 20 * ureg.mm)
+
+
+@pytest.mark.parametrize('r0_mm', [0, 10])
+def test_ray_radius(ray_mirror, r0_mm):
+    """Rays should start on the surface, focus, and continue across the axis."""
+    r0 = r0_mm * ureg.mm
+    sag = ray_mirror.sag(r0)
+    focus = ray_mirror.focal_distance(r0)
+    z = np.array([sag.m_as('cm'), focus.m_as('cm'), (2 * focus - sag).m_as('cm')]) * ureg.cm
+
+    r = ray_mirror.ray_radius(z, r0)
+
+    assert r.shape == z.shape
+    np.testing.assert_allclose(r.m_as('mm'), [r0_mm, 0, -r0_mm], rtol=1e-13, atol=1e-13)
+    scalar_r = ray_mirror.ray_radius(sag, r0)
+    assert scalar_r.shape == ()
+    np.testing.assert_allclose(scalar_r.m_as('mm'), r0_mm, rtol=1e-13, atol=1e-13)
+
+
+@pytest.mark.parametrize('z0_cm', [30, 70])
+def test_ray_snapshot(ray_mirror, z0_cm):
+    """Snapshots should preserve equal travel times and the reflection direction."""
+    r0 = np.array([0, 1, 5, 20]) * ureg.mm
+    z0 = z0_cm * ureg.cm
+    sag = ray_mirror.sag(r0)
+
+    z, r = ray_mirror.ray_snapshot(z0, r0)
+
+    assert z.shape == r.shape == r0.shape
+    np.testing.assert_allclose(z[0].m_as('cm'), z0_cm, rtol=1e-13)
+    np.testing.assert_allclose(r[0].m_as('mm'), 0, atol=1e-13)
+    traveled = np.hypot(z - sag, r - r0)
+    np.testing.assert_allclose((traveled - sag).m_as('cm'), z0_cm, rtol=1e-13)
+    slope = ray_mirror.sag_der(r0)
+    np.testing.assert_allclose(((r - r0) / traveled).m_as(''), -2 * slope / (1 + slope**2), atol=1e-14)
+    np.testing.assert_allclose(((z - sag) / traveled).m_as(''), (1 - slope**2) / (1 + slope**2), atol=1e-14)
+    if z0_cm == 70:
+        assert np.all(r[1:] < 0 * ureg.mm)
+    else:
+        assert np.all(r[1:] > 0 * ureg.mm)
+
+
+def test_ray_snapshot_scalar(ray_mirror):
+    """A scalar snapshot should agree with the ray's longitudinal parameterization."""
+    r0 = 10 * ureg.mm
+    z, r = ray_mirror.ray_snapshot(60 * ureg.cm, r0)
+
+    assert z.shape == r.shape == ()
+    np.testing.assert_allclose(r.m_as('mm'), ray_mirror.ray_radius(z, r0).m_as('mm'), rtol=1e-12, atol=1e-13)
 
 
 @pytest.mark.parametrize('threshold, expected', [(1, 9), (0.5, 17), (2, 5)])

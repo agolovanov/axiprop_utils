@@ -264,6 +264,65 @@ class AxisymmetricMirror(ABC):
         """
         return 1 / self._H_func(r) - self.focal_distance(r)
 
+    def ray_radius(self, z: Quantity, r0: Quantity) -> Quantity:
+        """Evaluate the signed radius along a reflected ray.
+
+        Parameters
+        ----------
+        z : pint.Quantity, scalar or of shape (N_z,)
+            Longitudinal positions relative to the mirror vertex plane.
+        r0 : pint.Quantity, scalar
+            Non-negative radius at which the ray strikes the mirror.
+
+        Returns
+        -------
+        pint.Quantity, scalar or of shape (N_z,)
+            Signed radial positions, negative after the ray crosses the axis.
+
+        Notes
+        -----
+        Assumes collimated axial incidence and a nonzero difference between
+        focal distance and sag. The reflected straight line is extrapolated
+        for all supplied z values.
+        """
+        sag = self.sag(r0)
+        focal_distance = self.focal_distance(r0)
+        return r0 * (focal_distance - z) / (focal_distance - sag)
+
+    def ray_snapshot(self, z0: Quantity, r0: Quantity) -> tuple[Quantity, Quantity]:
+        """Evaluate reflected ray positions when the axial ray is at z0.
+
+        Parameters
+        ----------
+        z0 : pint.Quantity, scalar
+            Longitudinal position of the axial ray relative to the mirror vertex.
+        r0 : pint.Quantity, scalar or of shape (N_r,)
+            Non-negative radii at which the rays strike the mirror.
+
+        Returns
+        -------
+        z : pint.Quantity, scalar or of shape (N_r,)
+            Longitudinal positions of the rays at the same time.
+        r : pint.Quantity, scalar or of shape (N_r,)
+            Signed radial positions, negative after each ray crosses the axis.
+
+        Notes
+        -----
+        Assumes collimated axial incidence with a flat incident pulse front,
+        vacuum propagation, and zero sag at the vertex. The incident sag
+        correction makes the distance traveled after reflection z0 + s(r0).
+        Only reflected trajectories are described, extrapolated even when
+        z0 < -s(r0).
+        """
+        sag = self.sag(r0)
+        focal_distance = self.focal_distance(r0)
+        reflected_length = np.hypot(r0, focal_distance - sag)
+        distance = z0 + sag
+        return (
+            sag + distance * (focal_distance - sag) / reflected_length,
+            r0 * (1 - distance / reflected_length),
+        )
+
 
 @dataclass(frozen=True)
 class ParabolicMirror(AxisymmetricMirror):
@@ -283,12 +342,12 @@ class ParabolicMirror(AxisymmetricMirror):
 
     def _H_func(self, r: Quantity) -> Quantity:
         """Evaluate the constant parabolic H function ``1 / (2 * focal_length)``."""
-        return np.ones(r.shape) / (2 * self.focal_length)
+        return np.ones(np.shape(r)) / (2 * self.focal_length)
 
     @typing.override
     def focal_distance(self, r: Quantity) -> Quantity:
-        return np.ones(r.shape) * self.focal_length
+        return np.ones(np.shape(r)) * self.focal_length
 
     @typing.override
     def optical_path(self, r: Quantity) -> Quantity:
-        return np.ones(r.shape) * self.focal_length
+        return np.ones(np.shape(r)) * self.focal_length
