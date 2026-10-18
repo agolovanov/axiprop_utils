@@ -102,6 +102,21 @@ def test_parabolic_mirror_focal_distance(r_mm):
     np.testing.assert_allclose(analytical.m_as('m'), generic.m_as('m'), rtol=1e-14)
 
 
+@pytest.mark.parametrize('r_mm', [[], [0], [0, 1, 10, 800, 1200]])
+def test_parabolic_mirror_optical_path(r_mm):
+    """The incident sag correction should make all parabolic paths equal."""
+    mirror = ParabolicMirror(50 * ureg.cm)
+    r = np.array(r_mm) * ureg.mm
+    sag = mirror.sag(r)
+    geometric = np.hypot(r, mirror.focal_distance(r) - sag) - sag
+    path = mirror.optical_path(r)
+
+    assert path.shape == r.shape
+    np.testing.assert_allclose(path.m_as('m'), 0.5, rtol=1e-14)
+    np.testing.assert_allclose(path.m_as('m'), geometric.m_as('m'), rtol=1e-14)
+    np.testing.assert_allclose(path.m_as('m'), AxisymmetricMirror.optical_path(mirror, r).m_as('m'), rtol=1e-14)
+
+
 def test_mirror_parabolic_delegates_to_class():
     """The deprecated function should produce the class spectral multiplier."""
     focal_length = 0.5 * ureg.m

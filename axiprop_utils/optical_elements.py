@@ -244,6 +244,26 @@ class AxisymmetricMirror(ABC):
         )
         return apply_spectral_multiplier(envelope, multiplier)
 
+    def optical_path(self, r: Quantity) -> Quantity:
+        """Evaluate the optical path from the incident reference plane to the axis.
+
+        For collimated axial incidence, the reflected segment has length
+        ``L(r) = sqrt(r**2 + (f(r) - s(r))**2)``. The incident segment contributes
+        ``-s(r)`` relative to the vertex plane, so ``p(r) = L(r) - s(r)``.
+
+        Parameters
+        ----------
+        r : pint.Quantity of shape (N_r,)
+            Radial coordinates at which to evaluate the path.
+
+        Returns
+        -------
+        pint.Quantity of shape (N_r,)
+            Vacuum optical path to each ray's focal position, with the common
+            incident propagation distance to the mirror vertex subtracted.
+        """
+        return 1 / self._H_func(r) - self.focal_distance(r)
+
 
 @dataclass(frozen=True)
 class ParabolicMirror(AxisymmetricMirror):
@@ -267,4 +287,8 @@ class ParabolicMirror(AxisymmetricMirror):
 
     @typing.override
     def focal_distance(self, r: Quantity) -> Quantity:
+        return np.ones(r.shape) * self.focal_length
+
+    @typing.override
+    def optical_path(self, r: Quantity) -> Quantity:
         return np.ones(r.shape) * self.focal_length

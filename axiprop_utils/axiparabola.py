@@ -121,6 +121,11 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
     def focal_distance(self, r: 'Quantity') -> 'Quantity':
         return self.focal_length + self.focal_depth * (r / self.beam_radius) ** 2
 
+    @typing.override
+    def optical_path(self, r: 'Quantity') -> 'Quantity':
+        sag = self.sag(r)
+        return np.hypot(r, self.focal_distance(r) - sag) - sag
+
     def calculate_constant_velocity_coefficients(self, dv: float) -> tuple['Quantity', 'Quantity']:
         """Calculate the radial-delay coefficients for a focal velocity.
 

@@ -61,6 +61,26 @@ def test_axiparabola_focal_distance(depth, beam_radius):
     np.testing.assert_allclose(analytical.m_as('m'), generic.m_as('m'), rtol=1e-13)
 
 
+@pytest.mark.parametrize('depth', [-0.1, 0, 0.1])
+@pytest.mark.parametrize('r_mm', [[], [0], [0, 1, 5, 20]])
+def test_axiparabola_optical_path(depth, r_mm):
+    """The optical path should include both incident and reflected segments."""
+    mirror = ConstantIntensityAxiparabola(50 * ureg.cm, depth * ureg.m, 20 * ureg.mm)
+    r = np.array(r_mm) * ureg.mm
+    sag = mirror.sag(r)
+    focal_distance = mirror.focal_distance(r)
+    path = mirror.optical_path(r)
+    reflected_length = np.sqrt(r**2 + (focal_distance - sag) ** 2)
+
+    assert path.shape == r.shape
+    np.testing.assert_allclose((path + sag).m_as('m'), reflected_length.m_as('m'), rtol=1e-13)
+    np.testing.assert_allclose(path.m_as('m'), AxisymmetricMirror.optical_path(mirror, r).m_as('m'), rtol=1e-13)
+    if r.size:
+        np.testing.assert_allclose(path[0].m_as('m'), mirror.focal_length.m_as('m'), rtol=1e-14)
+    if depth == 0:
+        np.testing.assert_allclose(path.m_as('m'), mirror.focal_length.m_as('m'), rtol=1e-13)
+
+
 @pytest.mark.parametrize('depth', [-0.1, 0.1])
 def test_sag_der(depth):
     """Integrating the surface slope should reproduce the sag difference."""
