@@ -1,5 +1,6 @@
 import typing
 import warnings
+from importlib.metadata import version as _version
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,8 @@ if typing.TYPE_CHECKING:
         PropagatorSymmetric,
     )
     from axiprop.steppers import StepperFresnel, StepperNonParaxial
+
+__version__ = _version('axiprop_utils')
 
 ureg = pint.get_application_registry()
 
