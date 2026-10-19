@@ -225,6 +225,138 @@ def test_ray_snapshot(ray_mirror, z0_cm):
         assert np.all(r[1:] > 0 * ureg.mm)
 
 
+@pytest.mark.parametrize('r_mm', [0, 10, [0, 1, 5, 20]])
+def test_ray_shift_on_axis(ray_mirror, r_mm):
+    """Axis-crossing shifts should agree with equal-time ray snapshots."""
+    r = np.asarray(r_mm) * ureg.mm
+    shift = ray_mirror.ray_shift_on_axis(r)
+    assert shift.shape == r.shape
+    assert shift.check('[length]')
+    for radius, displacement in zip(r.reshape(-1), shift.reshape(-1)):
+        crossing_time_length = ray_mirror.optical_path(radius)
+        z, radial_position = ray_mirror.ray_snapshot(crossing_time_length, radius)
+        np.testing.assert_allclose(radial_position.m_as('m'), 0, atol=1e-15)
+        np.testing.assert_allclose(displacement.m_as('m'), (z - crossing_time_length).m_as('m'), atol=1e-15)
+    if isinstance(ray_mirror, ParabolicMirror):
+        np.testing.assert_allclose(shift.m_as('m'), 0, atol=1e-15)
+
+
+@pytest.mark.parametrize('r_mm', [10, [0, 1, 5, 20]])
+def test_ray_shift_on_axis_delay(ray_mirror, r_mm):
+    """Signed delays should shift axis crossings by minus c times the delay."""
+    r = np.asarray(r_mm) * ureg.mm
+    tau_delay = (np.arange(r.size).reshape(r.shape) - 1) * ureg.fs
+    undelayed = ray_mirror.ray_shift_on_axis(r)
+    delayed = ray_mirror.ray_shift_on_axis(r.to('cm'), tau_delay=tau_delay.to('ps'))
+    assert delayed.shape == r.shape
+    np.testing.assert_allclose(
+        delayed.m_as('m'), (undelayed - ureg.speed_of_light * tau_delay).m_as('m'), rtol=1e-12, atol=1e-15
+    )
+    np.testing.assert_allclose(
+        ray_mirror.ray_shift_on_axis(r, tau_delay=np.zeros(r.shape) * ureg.fs).m_as('m'),
+        undelayed.m_as('m'),
+        atol=1e-15,
+    )
+
+
+@pytest.mark.parametrize(
+    ('tau_delay', 'error'),
+    [(np.zeros(2), TypeError), (0 * ureg.fs, ValueError), (np.zeros(2) * ureg.mm, pint.DimensionalityError)],
+)
+def test_ray_shift_on_axis_invalid_delay(tau_delay, error):
+    """Radial delays must be time quantities matching the radii's shape."""
+    with pytest.raises(error):
+        ParabolicMirror(50 * ureg.cm).ray_shift_on_axis(np.array([0, 10]) * ureg.mm, tau_delay=tau_delay)
+
+
+def test_ray_shift_on_axis_scalar_delay():
+    """Scalar quantities should support a positive delay and return a scalar shift."""
+    shift = ParabolicMirror(50 * ureg.cm).ray_shift_on_axis(10 * ureg.mm, tau_delay=1 * ureg.fs)
+    assert np.shape(shift.magnitude) == ()
+    np.testing.assert_allclose(shift.m_as('m'), -(1 * ureg.speed_of_light * ureg.fs).m_as('m'), rtol=1e-14)
+
+
+def test_focal_distance_der_optional(focal_map_mirror):
+    """Existing mirror subclasses can omit the analytic derivative."""
+    with pytest.raises(NotImplementedError, match='analytic'):
+        focal_map_mirror.focal_distance_der(10 * ureg.mm)
+    with pytest.raises(NotImplementedError, match='analytic'):
+        focal_map_mirror.velocity_on_axis(10 * ureg.mm)
+
+
+@pytest.mark.parametrize('r_mm', [0, 10, [0, 1, 10, 20]])
+def test_focal_distance_der(ray_mirror, r_mm):
+    """Analytic focal derivatives should preserve shape, units, and depth sign."""
+    r = np.asarray(r_mm) * ureg.mm
+    actual = ray_mirror.focal_distance_der(r.to('cm'))
+    assert isinstance(actual, np.ndarray)
+    assert actual.shape == r.shape
+    expected = np.zeros(r.shape)
+    if isinstance(ray_mirror, ConstantIntensityAxiparabola):
+        expected = (2 * ray_mirror.focal_depth * r / ray_mirror.beam_radius**2).m_as('')
+    np.testing.assert_allclose(actual, expected, rtol=1e-14)
+
+
+@pytest.mark.parametrize('depth_mm', [-100, 100])
+def test_velocity_on_axis(depth_mm):
+    """Delay gradients should reproduce the velocity of neighboring axis crossings."""
+    mirror = ConstantIntensityAxiparabola(50 * ureg.cm, depth_mm * ureg.mm, 20 * ureg.mm)
+    r = np.array([1, 5, 15]) * ureg.mm
+    alpha = 1 * ureg('fs/mm**2')
+    velocity = mirror.velocity_on_axis(r, tau_delay_der=2 * alpha * r)
+    dr = 1e-4 * ureg.mm
+    r_minus, r_plus = r - dr, r + dr
+    dz = mirror.focal_distance(r_plus) - mirror.focal_distance(r_minus)
+    dt = (mirror.optical_path(r_plus) - mirror.optical_path(r_minus)) / ureg.speed_of_light + alpha * (
+        r_plus**2 - r_minus**2
+    )
+    assert isinstance(velocity, np.ndarray)
+    assert velocity.shape == r.shape
+    # The centered difference is a check of the analytic geometry, not an API implementation.
+    np.testing.assert_allclose(velocity, (dz / (ureg.speed_of_light * dt)).m_as(''), rtol=1e-6)
+    cosine = (1 - mirror.sag_der(r) ** 2) / (1 + mirror.sag_der(r) ** 2)
+    np.testing.assert_allclose(
+        mirror.velocity_on_axis(r),
+        1 / cosine,
+        rtol=1e-14,
+    )
+    np.testing.assert_allclose(
+        mirror.velocity_on_axis(r.to('cm'), tau_delay_der=(2 * alpha * r).to('ps/cm')),
+        velocity,
+        rtol=1e-14,
+    )
+    scalar = mirror.velocity_on_axis(5 * ureg.mm, tau_delay_der=10 * ureg('fs/mm'))
+    assert isinstance(scalar, np.ndarray)
+    assert scalar.shape == ()
+    np.testing.assert_allclose(scalar, velocity[1], rtol=1e-14)
+
+
+def test_velocity_on_axis_degenerate_points():
+    """Collapsed foci are undefined and nearly stationary arrival times give large velocities."""
+    parabola = ParabolicMirror(50 * ureg.cm)
+    r = np.array([0, 10]) * ureg.mm
+    assert np.all(np.isnan(parabola.velocity_on_axis(r)))
+    np.testing.assert_allclose(parabola.velocity_on_axis(r, tau_delay_der=np.ones(2) * ureg('fs/mm')), 0)
+    mirror = ConstantIntensityAxiparabola(50 * ureg.cm, 10 * ureg.cm, 20 * ureg.mm)
+    assert np.isnan(mirror.velocity_on_axis(0 * ureg.mm))
+    slope = mirror.sag_der(r)
+    tau_delay_der = -mirror.focal_distance_der(r) * (1 - slope**2) / (1 + slope**2) / (1 * ureg.speed_of_light)
+    velocity = mirror.velocity_on_axis(r, tau_delay_der=tau_delay_der)
+    assert np.isnan(velocity[0])
+    # Unit conversion can leave roundoff in the otherwise zero arrival-time derivative.
+    assert abs(velocity[1]) > 1e12
+
+
+@pytest.mark.parametrize(
+    ('tau_delay_der', 'error'),
+    [(np.zeros(2), TypeError), (0 * ureg('fs/mm'), ValueError), (np.zeros(2) * ureg.fs, pint.DimensionalityError)],
+)
+def test_velocity_on_axis_invalid_delay_derivative(tau_delay_der, error):
+    """Delay derivatives must have time per length units and match the radii's shape."""
+    with pytest.raises(error):
+        ParabolicMirror(50 * ureg.cm).velocity_on_axis(np.array([0, 10]) * ureg.mm, tau_delay_der=tau_delay_der)
+
+
 def test_ray_snapshot_scalar(ray_mirror):
     """A scalar snapshot should agree with the ray's longitudinal parameterization."""
     r0 = 10 * ureg.mm
@@ -232,6 +364,51 @@ def test_ray_snapshot_scalar(ray_mirror):
 
     assert z.shape == r.shape == ()
     np.testing.assert_allclose(r.m_as('mm'), ray_mirror.ray_radius(z, r0).m_as('mm'), rtol=1e-12, atol=1e-13)
+
+
+def test_ray_snapshot_delay(ray_mirror):
+    """Delayed snapshots should preserve travel times and agree with axis-crossing shifts."""
+    r0 = np.array([0, 1, 5, 20]) * ureg.mm
+    tau_delay = np.array([20, -10, 0, 30]) * ureg.fs
+    z0 = 60 * ureg.cm
+    z, r = ray_mirror.ray_snapshot(z0, r0, tau_delay=tau_delay.to('ps'))
+    assert z.shape == r.shape == r0.shape
+    sag = ray_mirror.sag(r0)
+    traveled = np.hypot(z - sag, r - r0)
+    np.testing.assert_allclose((traveled - sag + ureg.speed_of_light * tau_delay).m_as('cm'), z0.m_as('cm'), rtol=1e-13)
+    np.testing.assert_allclose(z[0].m_as('m'), (z0 - ureg.speed_of_light * tau_delay[0]).m_as('m'), rtol=1e-13)
+    for radius, delay in zip(r0, tau_delay):
+        crossing_z0 = ray_mirror.optical_path(radius) + ureg.speed_of_light * delay
+        crossing_z, crossing_r = ray_mirror.ray_snapshot(crossing_z0, radius, tau_delay=delay)
+        np.testing.assert_allclose(crossing_r.m_as('m'), 0, atol=1e-15)
+        np.testing.assert_allclose(
+            (crossing_z - crossing_z0).m_as('m'),
+            ray_mirror.ray_shift_on_axis(radius, tau_delay=delay).m_as('m'),
+            atol=1e-15,
+        )
+    zero_delay = ray_mirror.ray_snapshot(z0, r0, tau_delay=np.zeros(r0.shape) * ureg.fs)
+    for actual, expected in zip(zero_delay, ray_mirror.ray_snapshot(z0, r0)):
+        np.testing.assert_allclose(actual.m_as('m'), expected.m_as('m'), rtol=1e-14)
+
+
+def test_ray_snapshot_scalar_delay(ray_mirror):
+    """A scalar delay should evaluate the same trajectory at an earlier time."""
+    z0, r0, tau_delay = 60 * ureg.cm, 10 * ureg.mm, 5 * ureg.fs
+    delayed = ray_mirror.ray_snapshot(z0, r0, tau_delay=tau_delay)
+    earlier = ray_mirror.ray_snapshot(z0 - ureg.speed_of_light * tau_delay, r0)
+    for actual, expected in zip(delayed, earlier):
+        assert np.shape(actual.magnitude) == ()
+        np.testing.assert_allclose(actual.m_as('m'), expected.m_as('m'), rtol=1e-14)
+
+
+@pytest.mark.parametrize(
+    ('tau_delay', 'error'),
+    [(np.zeros(2), TypeError), (0 * ureg.fs, ValueError), (np.zeros(2) * ureg.mm, pint.DimensionalityError)],
+)
+def test_ray_snapshot_invalid_delay(tau_delay, error):
+    """Snapshot delays must be time quantities matching the incident radii's shape."""
+    with pytest.raises(error):
+        ParabolicMirror(50 * ureg.cm).ray_snapshot(60 * ureg.cm, np.array([0, 10]) * ureg.mm, tau_delay=tau_delay)
 
 
 @pytest.mark.parametrize('threshold, expected', [(1, 9), (0.5, 17), (2, 5)])

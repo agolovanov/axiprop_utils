@@ -83,6 +83,26 @@ class AxisymmetricMirror(ABC):
         H_value = self._H_func(r)
         return self.sag(r) + (1 - (r * H_value) ** 2) / (2 * H_value)
 
+    def focal_distance_der(self, r: Quantity) -> np.ndarray:
+        """Evaluate the analytic radial derivative of the focal distance.
+
+        Parameters
+        ----------
+        r : pint.Quantity, scalar or array
+            Non-negative radial coordinates.
+
+        Returns
+        -------
+        np.ndarray, same shape as r
+            Dimensionless derivative df/dr.
+
+        Raises
+        ------
+        NotImplementedError
+            If the subclass does not supply an analytic derivative.
+        """
+        raise NotImplementedError('This mirror does not implement an analytic focal-distance derivative')
+
     def spectral_multiplier(
         self,
         kz: np.ndarray | Quantity,
@@ -263,6 +283,88 @@ class AxisymmetricMirror(ABC):
             incident propagation distance to the mirror vertex subtracted.
         """
         return 1 / self._H_func(r) - self.focal_distance(r)
+
+    def ray_shift_on_axis(self, r: Quantity, tau_delay: Quantity | None = None) -> Quantity:
+        """Evaluate each ray's axial shift at its axis crossing relative to z = ct.
+
+        Parameters
+        ----------
+        r : pint.Quantity, scalar or array
+            Non-negative radii at which the rays strike the mirror.
+        tau_delay : pint.Quantity, scalar or array, optional
+            Incident radial delay in time units, with the same shape as r.
+            Defaults to zero. Positive values delay the rays.
+
+        Returns
+        -------
+        pint.Quantity, same shape as r
+            Axial shifts ``f(r) - p(r) - c * tau_delay(r)``. Positive shifts are
+            ahead of the reference ray and negative shifts are behind it.
+
+        Notes
+        -----
+        Assumes collimated axial incidence, vacuum propagation, and zero sag
+        at the vertex. Time is measured from the undelayed incident pulse
+        reaching the vertex, so the reference ray is at z = ct. The delay
+        changes arrival times without changing the reflected ray directions.
+        """
+        if tau_delay is not None:
+            if not isinstance(tau_delay, pint.Quantity):
+                raise TypeError('tau_delay must be a pint.Quantity with time units')
+            if np.shape(tau_delay.magnitude) != np.shape(r.magnitude):
+                raise ValueError('tau_delay must have the same shape as r')
+            tau_delay = tau_delay.to('s')
+        shift = self.focal_distance(r) - self.optical_path(r)
+        if tau_delay is not None:
+            shift = shift - ureg.speed_of_light * tau_delay
+        return shift
+
+    def velocity_on_axis(self, r: Quantity, tau_delay_der: Quantity | None = None) -> np.ndarray:
+        """Evaluate the geometrical axis-crossing velocity normalized to c.
+
+        Parameters
+        ----------
+        r : pint.Quantity, scalar or array
+            Non-negative radii at which the rays strike the mirror.
+        tau_delay_der : pint.Quantity, scalar or array, optional
+            Radial derivative of the incident delay, d(tau_delay)/dr, in time per
+            length units and with the same shape as r. Defaults to zero.
+
+        Returns
+        -------
+        np.ndarray, same shape as r
+            Dimensionless signed focal-locus velocity v/c at z = focal_distance(r).
+            Returns NaN where both position and arrival-time derivatives
+            vanish, and infinity for nonzero position derivative and zero
+            arrival-time derivative.
+
+        Notes
+        -----
+        Uses ``v/c = f_prime / (f_prime * cos(theta) + c * tau_delay_der)``, with
+        ``f_prime = focal_distance_der(r)`` and
+        ``cos(theta) = (1 - sag_der**2) / (1 + sag_der**2)``. This is the
+        velocity of successive axis crossings, not an individual ray's axial
+        velocity or the diffraction-resolved intensity peak. It assumes the
+        same geometry and time origin as ray_shift_on_axis.
+
+        Requires an analytic focal_distance_der implementation. No numerical differentiation
+        or limiting values at stationary points are inferred. In particular,
+        an undelayed parabola has no moving focal locus and returns NaN.
+        Non-monotonic focal maps may give multiple velocities at the same z.
+        """
+        delay_slope = 0.0
+        if tau_delay_der is not None:
+            if not isinstance(tau_delay_der, pint.Quantity):
+                raise TypeError('tau_delay_der must be a pint.Quantity with time per length units')
+            if np.shape(tau_delay_der.magnitude) != np.shape(r.magnitude):
+                raise ValueError('tau_delay_der must have the same shape as r')
+            delay_slope = (ureg.speed_of_light * tau_delay_der).m_as('')
+        focal_slope = np.asarray(self.focal_distance_der(r))
+        slope_squared = self.sag_der(r) ** 2
+        cos_theta = (1 - slope_squared) / (1 + slope_squared)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            velocity_ratio = focal_slope / (focal_slope * cos_theta + delay_slope)
+        return np.asarray(velocity_ratio)
 
     def intensity_on_axis(
         self,
@@ -530,15 +632,19 @@ class AxisymmetricMirror(ABC):
         focal_distance = self.focal_distance(r0)
         return r0 * (focal_distance - z) / (focal_distance - sag)
 
-    def ray_snapshot(self, z0: Quantity, r0: Quantity) -> tuple[Quantity, Quantity]:
-        """Evaluate reflected ray positions when the axial ray is at z0.
+    def ray_snapshot(self, z0: Quantity, r0: Quantity, tau_delay: Quantity | None = None) -> tuple[Quantity, Quantity]:
+        """Evaluate reflected ray positions when the undelayed reference ray is at z0.
 
         Parameters
         ----------
         z0 : pint.Quantity, scalar
-            Longitudinal position of the axial ray relative to the mirror vertex.
+            Longitudinal position of the undelayed axial reference ray relative
+            to the mirror vertex.
         r0 : pint.Quantity, scalar or of shape (N_r,)
             Non-negative radii at which the rays strike the mirror.
+        tau_delay : pint.Quantity, scalar or of shape (N_r,), optional
+            Incident radial delay in time units, with the same shape as r0.
+            Defaults to zero. Positive values delay the rays.
 
         Returns
         -------
@@ -549,16 +655,25 @@ class AxisymmetricMirror(ABC):
 
         Notes
         -----
-        Assumes collimated axial incidence with a flat incident pulse front,
-        vacuum propagation, and zero sag at the vertex. The incident sag
-        correction makes the distance traveled after reflection z0 + s(r0).
-        Only reflected trajectories are described, extrapolated even when
-        z0 < -s(r0).
+        Assumes collimated axial incidence, vacuum propagation, and zero sag
+        at the vertex. The incident sag and delay corrections make the distance
+        traveled after reflection ``z0 + s(r0) - c * tau_delay(r0)``. The reference
+        ray does not include tau_delay(0). Delays change arrival times without
+        changing the reflected ray directions. Only reflected trajectories
+        are described, extrapolated even when that distance is negative.
         """
+        if tau_delay is not None:
+            if not isinstance(tau_delay, pint.Quantity):
+                raise TypeError('tau_delay must be a pint.Quantity with time units')
+            if np.shape(tau_delay.magnitude) != np.shape(r0.magnitude):
+                raise ValueError('tau_delay must have the same shape as r0')
+            tau_delay = tau_delay.to('s')
         sag = self.sag(r0)
         focal_distance = self.focal_distance(r0)
         reflected_length = np.hypot(r0, focal_distance - sag)
         distance = z0 + sag
+        if tau_delay is not None:
+            distance = distance - ureg.speed_of_light * tau_delay
         return (
             sag + distance * (focal_distance - sag) / reflected_length,
             r0 * (1 - distance / reflected_length),
@@ -588,6 +703,10 @@ class ParabolicMirror(AxisymmetricMirror):
     @typing.override
     def focal_distance(self, r: Quantity) -> Quantity:
         return np.ones(np.shape(r)) * self.focal_length
+
+    @typing.override
+    def focal_distance_der(self, r: Quantity) -> np.ndarray:
+        return np.zeros(np.shape(r))
 
     @typing.override
     def optical_path(self, r: Quantity) -> Quantity:

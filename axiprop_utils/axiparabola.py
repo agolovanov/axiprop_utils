@@ -167,6 +167,10 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         return self.focal_length + self.focal_depth * (r / self.beam_radius) ** 2
 
     @typing.override
+    def focal_distance_der(self, r: 'Quantity') -> np.ndarray:
+        return np.asarray((2 * self.focal_depth * r / self.beam_radius**2).m_as(''))
+
+    @typing.override
     def optical_path(self, r: 'Quantity') -> 'Quantity':
         sag = self.sag(r)
         return np.hypot(r, self.focal_distance(r) - sag) - sag
