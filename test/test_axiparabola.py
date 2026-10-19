@@ -6,12 +6,143 @@ import numpy as np
 import pint
 import pytest
 
-from axiprop_utils import ConstantIntensityAxiparabola, ParabolicMirror, mirror_axiparabola, mirror_parabolic
+from axiprop_utils import (
+    AxiparabolaPolynomial,
+    ConstantIntensityAxiparabola,
+    ParabolicMirror,
+    mirror_axiparabola,
+    mirror_parabolic,
+)
 from axiprop_utils.axiparabola import add_constant_velocity_phase
 from axiprop_utils.optical_elements import AxisymmetricMirror
 from axiprop_utils.pulse import create_gaussian_pulse
 
 ureg = pint.get_application_registry()
+
+
+def test_polynomial_coefficients_and_beam_radius():
+    """Physical-radius coefficients reproduce the normalized theory surface."""
+    f0, d0, kappa = 50 * ureg.cm, 10 * ureg.mm, -8 * ureg.mm
+    radius, beam_radius = 30 * ureg.mm, 20 * ureg.mm
+    mirror = AxiparabolaPolynomial(f0, d0, kappa, radius, beam_radius)
+    r = np.linspace(0, 30, 31) * ureg.mm
+    rho = r / beam_radius
+    expected = beam_radius**2 / f0 * (rho**2 / 4 - d0 / f0 * rho**4 / 8 - kappa / f0 * rho**6 / 12)
+    np.testing.assert_allclose(mirror.sag(r).m_as('m'), expected.m_as('m'), rtol=1e-14)
+    np.testing.assert_allclose(
+        mirror.sag(r).m_as('m'), (mirror.b2 * r**2 + mirror.b4 * r**4 + mirror.b6 * r**6).m_as('m')
+    )
+    assert mirror.b2.check('1/[length]')
+    assert mirror.b4.check('1/[length]**3')
+    assert mirror.b6.check('1/[length]**5')
+    default = AxiparabolaPolynomial(f0, d0, kappa, radius)
+    explicit = AxiparabolaPolynomial(f0, d0, kappa, radius, radius)
+    np.testing.assert_array_equal(default.sag(r).magnitude, explicit.sag(r).magnitude)
+
+
+@pytest.mark.parametrize('r_mm', [0, 10, [], [20, 0, 10, 10], [[0, 5], [10, 20]]])
+@pytest.mark.parametrize(('d0_mm', 'kappa_mm'), [(10, 0), (-10, 5), (10, -10), (0, 10), (0, 0)])
+def test_polynomial_geometry(r_mm, d0_mm, kappa_mm):
+    """Exact geometry agrees with reflection and the base-class identities."""
+    mirror = AxiparabolaPolynomial(50 * ureg.cm, d0_mm * ureg.mm, kappa_mm * ureg.mm, 30 * ureg.mm)
+    r = np.asarray(r_mm) * ureg.mm
+    sag, focal, path = mirror.sag(r), mirror.focal_distance(r), mirror.optical_path(r)
+    slope = mirror.sag_der(r.to('cm'))
+    derivative = mirror.focal_distance_der(r)
+    assert sag.shape == focal.shape == path.shape == slope.shape == derivative.shape == r.shape
+    assert isinstance(derivative, np.ndarray)
+    np.testing.assert_allclose(focal.m_as('m'), AxisymmetricMirror.focal_distance(mirror, r).m_as('m'), rtol=1e-14)
+    np.testing.assert_allclose(path.m_as('m'), AxisymmetricMirror.optical_path(mirror, r).m_as('m'), rtol=1e-14)
+    np.testing.assert_allclose(path.m_as('m'), (np.hypot(r, focal - sag) - sag).m_as('m'), rtol=1e-14)
+    # Specular reflection gives the outgoing radial/axial direction ratio.
+    np.testing.assert_allclose((r / (focal - sag)).m_as(''), 2 * slope / (1 - slope**2), rtol=1e-14)
+    np.testing.assert_allclose(mirror.focal_distance(0 * ureg.mm).m_as('cm'), 50)
+
+
+@pytest.mark.parametrize(('d0_mm', 'kappa_mm'), [(10, -10), (-10, 8), (0, 10)])
+def test_polynomial_focal_derivative_and_velocity(d0_mm, kappa_mm):
+    """Analytic derivatives resolve a turning point and support exact delays."""
+    mirror = AxiparabolaPolynomial(50 * ureg.cm, d0_mm * ureg.mm, kappa_mm * ureg.mm, 30 * ureg.mm)
+    r = np.array([1, 10, 20, 29]) * ureg.mm
+    dr = 1e-3 * ureg.mm
+    numerical = (mirror.focal_distance(r + dr) - mirror.focal_distance(r - dr)) / (2 * dr)
+    # Centered differences include O(dr**2) truncation and metre-scale cancellation.
+    np.testing.assert_allclose(mirror.focal_distance_der(r), numerical.m_as(''), rtol=2e-7, atol=1e-10)
+    for dv in [-2, 0, 0.1]:
+        delay = mirror.constant_velocity_delay(r, dv)
+        arrival = mirror.optical_path(r) + ureg.speed_of_light * delay
+        expected = mirror.f0 + (mirror.focal_distance(r) - mirror.f0) / (1 + dv)
+        np.testing.assert_allclose(arrival.m_as('m'), expected.m_as('m'), rtol=1e-14)
+        np.testing.assert_allclose(
+            mirror.velocity_on_axis(r, tau_delay_der=mirror.constant_velocity_delay_der(r, dv)),
+            1 + dv,
+            rtol=1e-14,
+        )
+    if d0_mm == 10 and kappa_mm == -10:
+        turning_radius = mirror.beam_radius / np.sqrt(2)
+        # Cancellation at the analytic turning radius leaves floating-point roundoff.
+        np.testing.assert_allclose(mirror.focal_distance_der(turning_radius), 0, atol=5e-16)
+        assert mirror.focal_distance_der(20 * ureg.mm) > 0
+        assert mirror.focal_distance_der(29 * ureg.mm) < 0
+
+
+def test_polynomial_parabolic_limit():
+    """Zero nominal depth and curvature recover a parabola and equal paths."""
+    mirror = AxiparabolaPolynomial(50 * ureg.cm, 0 * ureg.mm, 0 * ureg.mm, 30 * ureg.mm)
+    parabola = ParabolicMirror(mirror.f0)
+    r = np.linspace(0, 30, 31) * ureg.mm
+    for method in ('sag', 'focal_distance', 'optical_path'):
+        np.testing.assert_allclose(getattr(mirror, method)(r).m_as('m'), getattr(parabola, method)(r).m_as('m'))
+    np.testing.assert_array_equal(mirror.focal_distance_der(r), 0)
+    np.testing.assert_allclose(
+        mirror.spectral_multiplier(np.array([1e7]), r), parabola.spectral_multiplier(np.array([1e7]), r)
+    )
+
+
+def test_polynomial_parameters_are_read_only():
+    """Input quantities and retrieved quantities cannot mutate mirror geometry."""
+    f0 = 50 * ureg.cm
+    mirror = AxiparabolaPolynomial(f0, 10 * ureg.mm, -5 * ureg.mm, 30 * ureg.mm)
+    f0 *= 2
+    assert mirror.f0.m_as('cm') == 50
+    for name in ('f0', 'd0', 'kappa', 'radius', 'beam_radius', 'b2', 'b4', 'b6'):
+        value = getattr(mirror, name)
+        expected = value.copy()
+        value *= 2
+        assert getattr(mirror, name) == expected
+        with pytest.raises(AttributeError):
+            setattr(mirror, name, value)
+
+
+@pytest.mark.parametrize(
+    ('name', 'value', 'error'),
+    [
+        ('f0', 0 * ureg.m, ValueError),
+        ('radius', -1 * ureg.mm, ValueError),
+        ('beam_radius', 0 * ureg.mm, ValueError),
+        ('beam_radius', 31 * ureg.mm, ValueError),
+        ('d0', np.nan * ureg.mm, ValueError),
+        ('kappa', np.inf * ureg.mm, ValueError),
+        ('kappa', np.ones(2) * ureg.mm, ValueError),
+        ('d0', 1 * ureg.s, pint.DimensionalityError),
+        ('kappa', 1, TypeError),
+    ],
+)
+def test_polynomial_invalid_parameters(name, value, error):
+    """Parameters require finite scalar lengths and a valid aperture."""
+    parameters = dict(f0=50 * ureg.cm, d0=10 * ureg.mm, kappa=-5 * ureg.mm, radius=30 * ureg.mm)
+    parameters[name] = value
+    with pytest.raises(error):
+        AxiparabolaPolynomial(**parameters)
+
+
+@pytest.mark.parametrize('method', ['sag', '_H_func', 'focal_distance', 'focal_distance_der', 'optical_path'])
+@pytest.mark.parametrize('r_mm', [-1, 31, np.nan, np.inf])
+def test_polynomial_invalid_radii(method, r_mm):
+    """Geometry evaluations reject radii outside the finite mirror domain."""
+    mirror = AxiparabolaPolynomial(50 * ureg.cm, 10 * ureg.mm, 0 * ureg.mm, 30 * ureg.mm)
+    with pytest.raises(ValueError):
+        getattr(mirror, method)(r_mm * ureg.mm)
 
 
 @pytest.mark.parametrize('depth', [-0.1, 0.1])

@@ -15,6 +15,151 @@ if typing.TYPE_CHECKING:
     from pint import Quantity
 
 
+class AxiparabolaPolynomial(AxisymmetricMirror):
+    """Axiparabola with an exact sixth-order polynomial sag.
+
+    The surface is ``s(r) = b2*r**2 + b4*r**4 + b6*r**6``. With
+    ``rho = r / beam_radius``, its shallow-mirror focal map is approximately
+    ``f0 + d0*rho**2 + kappa*rho**4``. The geometry methods evaluate the
+    exact polynomial surface rather than this approximate focal map.
+
+    Parameters
+    ----------
+    f0 : pint.Quantity
+        Positive nominal focal length, equal to the on-axis focal distance.
+    d0 : pint.Quantity
+        Signed nominal focal depth, with length units.
+    kappa : pint.Quantity
+        Signed focal-depth curvature coefficient, with length units.
+    radius : pint.Quantity
+        Positive mirror radius.
+    beam_radius : pint.Quantity, optional
+        Radius defining the nominal depth and curvature. Defaults to radius
+        and cannot exceed it.
+
+    Notes
+    -----
+    Parameters and coefficients are read-only. The dimensional coefficients
+    multiply physical radius, unlike the coefficients multiplying normalized
+    radius in the theory document:
+    ``b2 = 1/(4*f0)``, ``b4 = -d0/(8*f0**2*beam_radius**2)``, and
+    ``b6 = -kappa/(12*f0**2*beam_radius**4)``.
+
+    Signed depths and curvatures can produce non-monotonic focal maps.
+    A zero of H away from the axis represents a ray parallel to the axis;
+    its focal distance and optical path are singular.
+    """
+
+    def __init__(
+        self,
+        f0: 'Quantity',
+        d0: 'Quantity',
+        kappa: 'Quantity',
+        radius: 'Quantity',
+        beam_radius: 'Quantity' = None,
+    ):
+        parameters = (f0, d0, kappa, radius, radius if beam_radius is None else beam_radius)
+        if any(not isinstance(value, pint.Quantity) for value in parameters):
+            raise TypeError('Mirror parameters must be pint.Quantity objects')
+        if any(np.ndim(value.magnitude) != 0 for value in parameters):
+            raise ValueError('Mirror parameters must be scalar')
+        values_m = [value.m_as('m') for value in parameters]
+        if not np.all(np.isfinite(values_m)):
+            raise ValueError('Mirror parameters must be finite')
+        if values_m[0] <= 0:
+            raise ValueError('f0 must be positive')
+        if values_m[3] <= 0:
+            raise ValueError('radius must be positive')
+        if values_m[4] <= 0:
+            raise ValueError('beam_radius must be positive')
+        if values_m[4] > values_m[3]:
+            raise ValueError('beam_radius cannot exceed mirror radius')
+        self._f0, self._d0, self._kappa, self._radius, self._beam_radius = (value.copy() for value in parameters)
+        self._b2 = (1 / (4 * self._f0)).to('1/m')
+        self._b4 = (-self._d0 / (8 * self._f0**2 * self._beam_radius**2)).to('1/m**3')
+        self._b6 = (-self._kappa / (12 * self._f0**2 * self._beam_radius**4)).to('1/m**5')
+
+    @property
+    def f0(self) -> 'Quantity':
+        """Nominal on-axis focal length."""
+        return self._f0.copy()
+
+    @property
+    def d0(self) -> 'Quantity':
+        """Signed nominal focal depth at the beam radius."""
+        return self._d0.copy()
+
+    @property
+    def kappa(self) -> 'Quantity':
+        """Focal-depth curvature coefficient at the beam radius."""
+        return self._kappa.copy()
+
+    @property
+    def radius(self) -> 'Quantity':
+        """Mirror radius."""
+        return self._radius.copy()
+
+    @property
+    def beam_radius(self) -> 'Quantity':
+        """Reference beam radius for the nominal depth and curvature."""
+        return self._beam_radius.copy()
+
+    @property
+    def b2(self) -> 'Quantity':
+        """Quadratic sag coefficient in inverse-length units."""
+        return self._b2.copy()
+
+    @property
+    def b4(self) -> 'Quantity':
+        """Quartic sag coefficient in inverse-length-cubed units."""
+        return self._b4.copy()
+
+    @property
+    def b6(self) -> 'Quantity':
+        """Sextic sag coefficient in inverse-length-to-the-fifth units."""
+        return self._b6.copy()
+
+    def _radial_coordinate(self, r: 'Quantity') -> 'Quantity':
+        """Validate radial coordinates while preserving their shape."""
+        if not isinstance(r, pint.Quantity):
+            raise TypeError('r must be a pint.Quantity')
+        r_m = np.asarray(r.m_as('m'))
+        if not np.all(np.isfinite(r_m)):
+            raise ValueError('r must contain only finite values')
+        if np.any(r_m < 0):
+            raise ValueError('r must be non-negative')
+        if np.any(r_m > self._radius.m_as('m') * (1 + 1e-12)):
+            raise ValueError('r cannot extend beyond the mirror radius')
+        return r_m * ureg.m
+
+    @typing.override
+    def sag(self, r: 'Quantity') -> 'Quantity':
+        r = self._radial_coordinate(r)
+        return r**2 * (self._b2 + r**2 * (self._b4 + r**2 * self._b6))
+
+    @typing.override
+    def _H_func(self, r: 'Quantity') -> 'Quantity':
+        r = self._radial_coordinate(r)
+        return 2 * self._b2 + r**2 * (4 * self._b4 + 6 * self._b6 * r**2)
+
+    @typing.override
+    def focal_distance(self, r: 'Quantity') -> 'Quantity':
+        r = self._radial_coordinate(r)
+        return 1 / (2 * self._H_func(r)) - r**4 * (self._b4 + 2 * self._b6 * r**2)
+
+    @typing.override
+    def focal_distance_der(self, r: 'Quantity') -> np.ndarray:
+        r = self._radial_coordinate(r)
+        H = self._H_func(r)
+        H_der = 8 * r * (self._b4 + 3 * self._b6 * r**2)
+        return np.asarray((-H_der * (1 / H**2 + r**2) / 2).m_as(''))
+
+    @typing.override
+    def optical_path(self, r: 'Quantity') -> 'Quantity':
+        r = self._radial_coordinate(r)
+        return 1 / (2 * self._H_func(r)) + r**4 * (self._b4 + 2 * self._b6 * r**2)
+
+
 class ConstantIntensityAxiparabola(AxisymmetricMirror):
     """Axiparabola designed to produce a constant on-axis intensity.
 
