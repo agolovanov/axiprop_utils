@@ -228,6 +228,7 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             return alpha, beta0 * (1 + 2 * dv)
         return alpha / (1 + dv), beta0
 
+    @typing.override
     def add_constant_velocity_phase(
         self,
         envelope: 'ScalarFieldEnvelope',
@@ -245,11 +246,13 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             Envelope to which the phase correction is applied.
         dv : float
             Velocity difference relative to the speed of light, ``v/c - 1``.
-        method : {'series', 'oubrerie'}, optional
-            Coefficient calculation; see :meth:`calculate_constant_velocity_coefficients`.
-            Defaults to ``'series'``. Use ``'oubrerie'`` for the previous behavior.
+        method : {'series', 'oubrerie', 'exact'}, optional
+            Defaults to ``'series'``; see :meth:`calculate_constant_velocity_coefficients`.
+            Use ``'exact'`` for the geometrical delay from
+            :meth:`AxisymmetricMirror.constant_velocity_delay`.
         compensate_elongation : bool, optional
             Add a radial GDD term to compensate for pulse elongation.
+            Supported only for ``'series'`` and ``'oubrerie'``.
         return_correction_terms : bool, optional
             Return the applied delay and, when requested, GDD.
 
@@ -261,6 +264,11 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             returned.
         """
         from . import apply_radial_delay, apply_radial_GDD
+
+        if method == 'exact':
+            if compensate_elongation:
+                raise ValueError("compensate_elongation is not supported for method='exact'")
+            return super().add_constant_velocity_phase(envelope, dv, return_correction_terms=return_correction_terms)
 
         c = ureg('speed_of_light')
         r = envelope.r * ureg.m
@@ -350,11 +358,12 @@ def add_constant_velocity_phase(
         The focal depth of the axiparabola
     R : pint.Quantity
         The radius of the axiparabola
-    method : {'series', 'oubrerie'}, optional
+    method : {'series', 'oubrerie', 'exact'}, optional
         Coefficient calculation. Defaults to ``'oubrerie'`` to preserve the
         deprecated function's behavior; the mirror methods default to ``'series'``.
     compensate_elongation : bool, optional
         Whether to compensate for the elongation of the pulse due to the delay term by adding a GDD term, by default False
+        (unsupported for ``method='exact'``).
     return_correction_terms : bool, optional
         Whether to return the correction terms (tau_delay and gdd) along with the envelope, by default False
 

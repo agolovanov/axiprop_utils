@@ -284,6 +284,113 @@ def test_focal_distance_der_optional(focal_map_mirror):
         focal_map_mirror.velocity_on_axis(10 * ureg.mm)
 
 
+@pytest.mark.parametrize('dv', [-2.0, -0.1, 0.0, 0.1])
+@pytest.mark.parametrize('r_mm', [0, 10, [0, 1, 5, 20]])
+def test_constant_velocity_delay(ray_mirror, dv, r_mm):
+    """Exact delays put axis crossings on a straight line in position and time."""
+    r = np.asarray(r_mm) * ureg.mm
+    delay = ray_mirror.constant_velocity_delay(r.to('cm'), dv)
+    derivative = ray_mirror.constant_velocity_delay_der(r, dv)
+    assert delay.shape == derivative.shape == r.shape
+    assert delay.check('[time]')
+    assert derivative.check('[time] / [length]')
+    c = ureg.speed_of_light
+    arrival_path = ray_mirror.optical_path(r) + c * delay
+    expected = ray_mirror.optical_path(0 * ureg.m) + (
+        ray_mirror.focal_distance(r) - ray_mirror.focal_distance(0 * ureg.m)
+    ) / (1 + dv)
+    # Roundoff is set by the metre-scale optical path.
+    np.testing.assert_allclose(arrival_path.m_as('m'), expected.m_as('m'), rtol=2e-14)
+    assert ray_mirror.constant_velocity_delay(0 * ureg.mm, dv).m_as('s') == 0
+    velocity = ray_mirror.velocity_on_axis(r, tau_delay_der=derivative)
+    if isinstance(ray_mirror, ParabolicMirror) or ray_mirror.focal_depth == 0 * ureg.m:
+        np.testing.assert_allclose(delay.m_as('s'), 0, atol=1e-23)
+        np.testing.assert_allclose(derivative.m_as('s/m'), 0, atol=1e-23)
+        assert np.all(np.isnan(velocity))
+    else:
+        np.testing.assert_allclose(velocity[r.magnitude != 0], 1 + dv, rtol=2e-14)
+
+
+def test_constant_velocity_delay_generic_surface():
+    """A generic sag supports exact delays without a focal-distance derivative."""
+
+    class QuarticMirror(AxisymmetricMirror):
+        def sag(self, r):
+            return r**2 / (2 * ureg.m) - r**4 / ureg.m**3
+
+        def _H_func(self, r):
+            return 1 / ureg.m - 4 * r**2 / ureg.m**3
+
+    mirror = QuarticMirror()
+    r = np.array([0, 10, 50, 100]) * ureg.mm
+    reference = 10 * ureg.mm
+    delay = mirror.constant_velocity_delay(r, 0.1, reference_radius=reference)
+    assert delay[1].m_as('s') == 0
+    # Compute the optical path independently from the reflected ray length.
+    f = mirror.focal_distance(r)
+    s = mirror.sag(r)
+    arrival = np.hypot(r, f - s) - s + ureg.speed_of_light * delay
+    np.testing.assert_allclose((arrival - arrival[1]).m_as('m'), ((f - f[1]) / 1.1).m_as('m'), rtol=1e-11, atol=1e-16)
+    with pytest.raises(NotImplementedError, match='analytic'):
+        mirror.constant_velocity_delay_der(r, 0.1)
+
+
+@pytest.mark.parametrize('dv', [-2.0, -0.1, 0.0, 0.1])
+def test_constant_velocity_delay_der_matches_delay(dv):
+    """The analytic derivative agrees with independently sampled delay values."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm)
+    r = np.array([2, 10, 18]) * ureg.mm
+    dr = 1e-3 * ureg.mm
+    numerical = (mirror.constant_velocity_delay(r + dr, dv) - mirror.constant_velocity_delay(r - dr, dv)) / (2 * dr)
+    # The centered difference includes truncation and optical-path cancellation.
+    np.testing.assert_allclose(
+        mirror.constant_velocity_delay_der(r, dv).m_as('s/m'), numerical.m_as('s/m'), rtol=2e-4, atol=1e-18
+    )
+
+
+@pytest.mark.parametrize('method', ['constant_velocity_delay', 'constant_velocity_delay_der'])
+@pytest.mark.parametrize('dv', [-1.0, np.nan, np.inf, [0, 0.1]])
+def test_constant_velocity_delay_invalid_velocity(method, dv):
+    """Undefined or nonscalar velocities fail before evaluating the mirror."""
+    with pytest.raises(ValueError, match='dv'):
+        getattr(ParabolicMirror(0.5 * ureg.m), method)(10 * ureg.mm, dv)
+
+
+@pytest.mark.parametrize('method', ['generic', 'exact'])
+def test_add_exact_constant_velocity_phase(method):
+    """The generic and axiparabola methods apply the exact delay without mutation."""
+    from axiprop_utils import apply_radial_delay
+
+    envelope = create_gaussian_pulse(
+        800 * ureg.nm,
+        1 * ureg.J,
+        30 * ureg.fs,
+        5 * ureg.mm,
+        t_axis=np.linspace(-100, 100, 64) * ureg.fs,
+        r_axis=np.linspace(0, 20, 48) * ureg.mm,
+    )
+    original = envelope.Field_ft.copy()
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm)
+    delay = mirror.constant_velocity_delay(envelope.r * ureg.m, 0.01)
+    expected = apply_radial_delay(envelope, delay)
+    if method == 'generic':
+        actual, correction = AxisymmetricMirror.add_constant_velocity_phase(
+            mirror, envelope, 0.01, return_correction_terms=True
+        )
+        result = AxisymmetricMirror.add_constant_velocity_phase(mirror, envelope, 0.01)
+    else:
+        actual, correction = mirror.add_constant_velocity_phase(
+            envelope, 0.01, method='exact', return_correction_terms=True
+        )
+        result = mirror.add_constant_velocity_phase(envelope, 0.01, method='exact')
+    np.testing.assert_allclose(actual.Field_ft, expected.Field_ft)
+    np.testing.assert_allclose(result.Field_ft, expected.Field_ft)
+    np.testing.assert_allclose(correction.m_as('s'), delay.m_as('s'))
+    np.testing.assert_array_equal(envelope.Field_ft, original)
+    with pytest.raises(ValueError, match='compensate_elongation'):
+        mirror.add_constant_velocity_phase(envelope, 0.01, method='exact', compensate_elongation=True)
+
+
 @pytest.mark.parametrize('r_mm', [0, 10, [0, 1, 10, 20]])
 def test_focal_distance_der(ray_mirror, r_mm):
     """Analytic focal derivatives should preserve shape, units, and depth sign."""

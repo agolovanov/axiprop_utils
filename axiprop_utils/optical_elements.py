@@ -403,6 +403,111 @@ class AxisymmetricMirror(ABC):
         """
         return 1 / self._H_func(r) - self.focal_distance(r)
 
+    def constant_velocity_delay(self, r: Quantity, dv: float, *, reference_radius: Quantity = 0 * ureg.m) -> Quantity:
+        """Calculate the exact geometrical delay for a constant focal velocity.
+
+        Parameters
+        ----------
+        r : pint.Quantity, scalar or array
+            Non-negative radial coordinates.
+        dv : float
+            Finite signed velocity difference ``v/c - 1``, different from -1.
+        reference_radius : pint.Quantity, optional
+            Scalar radius at which the delay is zero, default zero.
+
+        Returns
+        -------
+        pint.Quantity, same shape as r
+            Incident radial delay in seconds. Positive values delay the rays.
+
+        Notes
+        -----
+        With focal distance f and optical path p, the arrival time is
+        ``t = p/c + tau``. Thus ``c*tau = (f - f_ref)/(1 + dv) - (p - p_ref)``.
+        This uses collimated axial incidence and vacuum ray propagation, without
+        a paraxial or radial-series approximation. It controls axis crossings,
+        not the diffraction-resolved intensity peak.
+
+        Both f and p must be finite at the requested and reference radii.
+        A constant focal map has no moving locus; stationary points retain
+        the undefined velocity reported by :meth:`velocity_on_axis`.
+        No analytic focal-distance derivative is needed for this calculation.
+        """
+        if np.ndim(dv) != 0 or not np.isfinite(dv):
+            raise ValueError('dv must be a finite scalar')
+        if dv == -1:
+            raise ValueError('dv must differ from -1')
+        reference_m = _length_magnitude(reference_radius)
+        if reference_m.ndim != 0 or not np.isfinite(reference_m) or reference_m < 0:
+            raise ValueError('reference_radius must be a non-negative, finite scalar length')
+        focal_difference = self.focal_distance(r) - self.focal_distance(reference_radius)
+        path_difference = self.optical_path(r) - self.optical_path(reference_radius)
+        return ((focal_difference / (1 + dv) - path_difference) / ureg.speed_of_light).to('s')
+
+    def constant_velocity_delay_der(self, r: Quantity, dv: float) -> Quantity:
+        """Calculate the analytic radial derivative of the constant-velocity delay.
+
+        Parameters
+        ----------
+        r : pint.Quantity, scalar or array
+            Non-negative radial coordinates.
+        dv : float
+            Finite signed velocity difference ``v/c - 1``, different from -1.
+
+        Returns
+        -------
+        pint.Quantity, same shape as r
+            Radial delay derivative in seconds per metre.
+
+        Notes
+        -----
+        Uses ``p_prime = f_prime * cos(theta)`` and therefore
+        ``tau_prime = f_prime * (1/(1 + dv) - cos(theta))/c``.
+        Requires :meth:`focal_distance_der`; no numerical differentiation is used.
+        The derivative is independent of the reference radius.
+        """
+        if np.ndim(dv) != 0 or not np.isfinite(dv):
+            raise ValueError('dv must be a finite scalar')
+        if dv == -1:
+            raise ValueError('dv must differ from -1')
+        slope_squared = self.sag_der(r) ** 2
+        cos_theta = (1 - slope_squared) / (1 + slope_squared)
+        return (self.focal_distance_der(r) * (1 / (1 + dv) - cos_theta) / ureg.speed_of_light).to('s/m')
+
+    def add_constant_velocity_phase(
+        self,
+        envelope: ScalarFieldEnvelope,
+        dv: float,
+        *,
+        return_correction_terms: bool = False,
+    ) -> ScalarFieldEnvelope | tuple[ScalarFieldEnvelope, Quantity]:
+        """Apply the exact radial delay for a constant geometrical focal velocity.
+
+        Parameters
+        ----------
+        envelope : ScalarFieldEnvelope
+            Axisymmetric envelope to which the delay is applied.
+        dv : float
+            Velocity difference ``v/c - 1``; see :meth:`constant_velocity_delay`.
+        return_correction_terms : bool, optional
+            Also return the applied radial delay, default False.
+
+        Returns
+        -------
+        ScalarFieldEnvelope or tuple
+            New envelope, or ``(envelope, tau_delay)`` when requested. The delay
+            is zero on the axis. The input envelope is not modified.
+        """
+        from . import apply_radial_delay, is_envelope_3d
+
+        if is_envelope_3d(envelope):
+            raise NotImplementedError('Constant-velocity phase does not yet support 3D envelopes')
+        tau_delay = self.constant_velocity_delay(envelope.r * ureg.m, dv)
+        result = apply_radial_delay(envelope, tau_delay)
+        if return_correction_terms:
+            return result, tau_delay
+        return result
+
     def ray_shift_on_axis(self, r: Quantity, tau_delay: Quantity | None = None) -> Quantity:
         """Evaluate each ray's axial shift at its axis crossing relative to z = ct.
 
