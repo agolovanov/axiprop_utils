@@ -7,7 +7,7 @@ import pint
 from axiprop.containers import ScalarFieldEnvelope
 
 from .axiparabola import ConstantIntensityAxiparabola, mirror_axiparabola
-from .optical_elements import AxisymmetricMirror, ParabolicMirror
+from .optical_elements import AxisymmetricMask, AxisymmetricMirror, Hole, ParabolicMirror, SuperGaussianHole
 from .pulse import create_gaussian_pulse
 
 if typing.TYPE_CHECKING:
@@ -69,7 +69,10 @@ def mirror_parabolic(kz, r, f0):
 
 
 def hole(r, r_hole, *, l_smooth=None, order_smooth=2):
-    """Introduces a hole with optional smooth boundaries.
+    """Introduce a hole with optional smooth boundaries.
+
+    .. deprecated::
+        Use :class:`Hole` instead.
 
     Parameters
     ----------
@@ -87,20 +90,21 @@ def hole(r, r_hole, *, l_smooth=None, order_smooth=2):
     np.ndarray
         The suppression mask.
     """
-    mirror_modulation = np.ones(r.shape)
-    hole_mask = r < r_hole
-
-    if l_smooth is not None:
-        mirror_modulation[hole_mask] = np.exp(-(((r[hole_mask] - r_hole) / l_smooth) ** order_smooth))
-    else:
-        mirror_modulation[hole_mask] = 0.0
-
-    return mirror_modulation
+    warnings.warn('hole() is deprecated; use Hole instead', DeprecationWarning, stacklevel=2)
+    r = r if isinstance(r, pint.Quantity) else r * ureg.m
+    r_hole = r_hole if isinstance(r_hole, pint.Quantity) else r_hole * ureg.m
+    if l_smooth is not None and not isinstance(l_smooth, pint.Quantity):
+        l_smooth = l_smooth * ureg.m
+    return Hole(r_hole, l_smooth=l_smooth, order_smooth=order_smooth).transmission(r)
 
 
 def hole_supergaussian(r, r_hole, order: int):
-    """Introduces a supergaussian-shaped suppression at the axis.
+    """Introduce a supergaussian-shaped suppression at the axis.
+
     The formula is 1 - exp(-(r/r_hole)^order).
+
+    .. deprecated::
+        Use :class:`SuperGaussianHole` instead.
 
     Parameters
     ----------
@@ -116,7 +120,10 @@ def hole_supergaussian(r, r_hole, order: int):
     np.ndarray
         The suppression mask.
     """
-    return 1.0 - np.exp(-((r / r_hole) ** (order)))
+    warnings.warn('hole_supergaussian() is deprecated; use SuperGaussianHole instead', DeprecationWarning, stacklevel=2)
+    r = r if isinstance(r, pint.Quantity) else r * ureg.m
+    r_hole = r_hole if isinstance(r_hole, pint.Quantity) else r_hole * ureg.m
+    return SuperGaussianHole(r_hole, order).transmission(r)
 
 
 def is_envelope_3d(envelope: ScalarFieldEnvelope) -> bool:

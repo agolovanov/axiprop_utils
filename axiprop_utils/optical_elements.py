@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 import warnings
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pint
@@ -15,6 +15,125 @@ if typing.TYPE_CHECKING:
     from pint import Quantity
 
 ureg = pint.get_application_registry()
+
+
+def _length_magnitude(value: Quantity) -> np.ndarray:
+    if not isinstance(value, pint.Quantity):
+        raise TypeError('Lengths must be pint.Quantity objects')
+    return np.asarray(value.m_as('m'))
+
+
+class AxisymmetricMask(ABC):
+    """Base class for a radial field-amplitude transmission mask."""
+
+    @abstractmethod
+    def transmission(self, r: Quantity) -> np.ndarray:
+        """Evaluate the dimensionless field-amplitude transmission.
+
+        Parameters
+        ----------
+        r : pint.Quantity
+            Radial coordinates with length units.
+
+        Returns
+        -------
+        np.ndarray
+            Transmission with the same shape as r.
+        """
+
+    def apply(self, envelope: ScalarFieldEnvelope) -> ScalarFieldEnvelope:
+        """Apply the mask to an axisymmetric envelope.
+
+        The input envelope is not modified. Transmission multiplies the field
+        amplitude equally at every frequency, so intensity scales with its square.
+
+        Parameters
+        ----------
+        envelope : ScalarFieldEnvelope
+            Axisymmetric scalar field envelope incident on the mask.
+
+        Returns
+        -------
+        ScalarFieldEnvelope
+            A new envelope containing the transmitted field.
+
+        Raises
+        ------
+        NotImplementedError
+            If the envelope has two transverse dimensions.
+        """
+        from . import apply_spectral_multiplier, is_envelope_3d
+
+        if is_envelope_3d(envelope):
+            raise NotImplementedError('AxisymmetricMask does not yet support 3D envelopes')
+        return apply_spectral_multiplier(envelope, self.transmission(envelope.r * ureg.m))
+
+
+@dataclass(frozen=True)
+class Hole(AxisymmetricMask):
+    """Suppress the field inside a radius, optionally with a smooth boundary.
+
+    Outside the hole, including its boundary, transmission is one. Inside,
+    transmission is zero for a hard hole or
+    ``exp(-((r - r_hole) / l_smooth)**order_smooth)`` for a smooth hole.
+
+    Parameters
+    ----------
+    r_hole : pint.Quantity
+        Hole radius with length units.
+    l_smooth : pint.Quantity, optional
+        Transition width with length units. None gives a hard boundary.
+    order_smooth : int, optional
+        Transition exponent, default 2.
+    """
+
+    r_hole: Quantity
+    l_smooth: Quantity | None = field(default=None, kw_only=True)
+    order_smooth: int = field(default=2, kw_only=True)
+
+    def __post_init__(self):
+        """Require length units for the hole radius and transition width."""
+        _length_magnitude(self.r_hole)
+        if self.l_smooth is not None:
+            _length_magnitude(self.l_smooth)
+
+    @typing.override
+    def transmission(self, r: Quantity) -> np.ndarray:
+        r_m = _length_magnitude(r)
+        r_hole_m = _length_magnitude(self.r_hole)
+        transmission = np.ones(r_m.shape)
+        inside = r_m < r_hole_m
+        if self.l_smooth is None:
+            transmission[inside] = 0.0
+        else:
+            transmission[inside] = np.exp(
+                -(((r_m[inside] - r_hole_m) / _length_magnitude(self.l_smooth)) ** self.order_smooth)
+            )
+        return transmission
+
+
+@dataclass(frozen=True)
+class SuperGaussianHole(AxisymmetricMask):
+    """Suppress the field near the axis with ``1 - exp(-(r/r_hole)**order)``.
+
+    Parameters
+    ----------
+    r_hole : pint.Quantity
+        Characteristic hole radius with length units.
+    order : int
+        Supergaussian exponent.
+    """
+
+    r_hole: Quantity
+    order: int
+
+    def __post_init__(self):
+        """Require length units for the characteristic radius."""
+        _length_magnitude(self.r_hole)
+
+    @typing.override
+    def transmission(self, r: Quantity) -> np.ndarray:
+        return 1.0 - np.exp(-((_length_magnitude(r) / _length_magnitude(self.r_hole)) ** self.order))
 
 
 class AxisymmetricMirror(ABC):
