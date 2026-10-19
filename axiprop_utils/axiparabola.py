@@ -175,7 +175,9 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         sag = self.sag(r)
         return np.hypot(r, self.focal_distance(r) - sag) - sag
 
-    def calculate_constant_velocity_coefficients(self, dv: float) -> tuple['Quantity', 'Quantity']:
+    def calculate_constant_velocity_coefficients(
+        self, dv: float, *, method: str = 'series'
+    ) -> tuple['Quantity', 'Quantity']:
         """Calculate the radial-delay coefficients for a focal velocity.
 
         The coefficients define the delay
@@ -185,6 +187,11 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         ----------
         dv : float
             Velocity difference relative to the speed of light, ``v/c - 1``.
+        method : {'series', 'oubrerie'}, optional
+            Default ``'series'`` expands the geometrical arrival time through
+            fourth order in radius, keeping the exact dependence on dv.
+            ``'oubrerie'`` preserves the previous calculation from Eq. (21) of
+            Oubrerie et al., J. Opt. 24, 045503 (2022).
 
         Returns
         -------
@@ -192,18 +199,41 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             Quadratic radial-delay coefficient.
         beta : pint.Quantity
             Quartic radial-delay coefficient.
+
+        Notes
+        -----
+        Write ``a = focal_depth / beam_radius**2`` and ``f0 = focal_length``.
+        The optical path is ``p(r) = f0 + a*r**2 - a*r**4/(4*f0**2) + O(r**6)``.
+        Requiring ``p(r) + c*tau_delay(r) = f0 + a*r**2/(1+dv)`` therefore gives
+        ``alpha = -a*dv/(c*(1+dv))`` and ``beta = a/(4*c*f0**2)``.
+        This is a local series about the axis, not an exact constant velocity
+        over the entire focal line. It leaves errors of order r**4 in v/c.
+        The series method is undefined for ``dv = -1`` (zero focal velocity).
+
+        The Oubrerie approximation instead uses ``alpha = -a*dv/c`` and
+        ``beta = a*(1+2*dv)/(4*c*f0**2)``. See
+        https://doi.org/10.1088/2040-8986/ac57d2, Eqs. (18)-(21).
         """
+        if method not in ('series', 'oubrerie'):
+            raise ValueError("method must be 'series' or 'oubrerie'")
+        if not np.isfinite(dv):
+            raise ValueError('dv must be finite')
+        if method == 'series' and dv == -1:
+            raise ValueError('dv must differ from -1 for the series method')
+
         c = ureg('speed_of_light')
         alpha = -dv * self.focal_depth / self.beam_radius**2 / c
         beta0 = self.focal_depth / (4 * self.focal_length**2 * self.beam_radius**2 * c)
-        beta = beta0 * (1 + 2 * dv)
-        return alpha, beta
+        if method == 'oubrerie':
+            return alpha, beta0 * (1 + 2 * dv)
+        return alpha / (1 + dv), beta0
 
     def add_constant_velocity_phase(
         self,
         envelope: 'ScalarFieldEnvelope',
         dv: float,
         *,
+        method: str = 'series',
         compensate_elongation: bool = False,
         return_correction_terms: bool = False,
     ) -> 'ScalarFieldEnvelope':
@@ -215,6 +245,9 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
             Envelope to which the phase correction is applied.
         dv : float
             Velocity difference relative to the speed of light, ``v/c - 1``.
+        method : {'series', 'oubrerie'}, optional
+            Coefficient calculation; see :meth:`calculate_constant_velocity_coefficients`.
+            Defaults to ``'series'``. Use ``'oubrerie'`` for the previous behavior.
         compensate_elongation : bool, optional
             Add a radial GDD term to compensate for pulse elongation.
         return_correction_terms : bool, optional
@@ -232,7 +265,7 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         c = ureg('speed_of_light')
         r = envelope.r * ureg.m
 
-        alpha, beta = self.calculate_constant_velocity_coefficients(dv)
+        alpha, beta = self.calculate_constant_velocity_coefficients(dv, method=method)
         beta0 = self.focal_depth / (4 * self.focal_length**2 * self.beam_radius**2 * c)
         tau_delay = alpha * r**2 + beta * r**4
 
@@ -295,6 +328,7 @@ def add_constant_velocity_phase(
     f0: 'Quantity',
     d0: 'Quantity',
     R: 'Quantity',
+    method: str = 'oubrerie',
     compensate_elongation: bool = False,
     return_correction_terms: bool = False,
 ) -> 'ScalarFieldEnvelope':
@@ -316,6 +350,9 @@ def add_constant_velocity_phase(
         The focal depth of the axiparabola
     R : pint.Quantity
         The radius of the axiparabola
+    method : {'series', 'oubrerie'}, optional
+        Coefficient calculation. Defaults to ``'oubrerie'`` to preserve the
+        deprecated function's behavior; the mirror methods default to ``'series'``.
     compensate_elongation : bool, optional
         Whether to compensate for the elongation of the pulse due to the delay term by adding a GDD term, by default False
     return_correction_terms : bool, optional
@@ -339,6 +376,7 @@ def add_constant_velocity_phase(
     return mirror.add_constant_velocity_phase(
         envelope,
         dv,
+        method=method,
         compensate_elongation=compensate_elongation,
         return_correction_terms=return_correction_terms,
     )

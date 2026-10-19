@@ -355,7 +355,9 @@ def test_axiparabola_requires_positive_focal_distance_at_mirror_edge():
         )
 
 
-def test_constant_velocity_phase_is_axiparabola_method():
+@pytest.mark.parametrize('method', ['series', 'oubrerie', None])
+@pytest.mark.parametrize('compensate_elongation', [False, True])
+def test_constant_velocity_phase_is_axiparabola_method(method, compensate_elongation):
     """The compatibility function should delegate to the mirror method."""
     focal_length = 0.5 * ureg.m
     focal_depth = 10 * ureg.cm
@@ -370,38 +372,89 @@ def test_constant_velocity_phase_is_axiparabola_method():
         r_axis=np.linspace(0, radius, 48),
     )
     mirror = ConstantIntensityAxiparabola(focal_length, focal_depth, radius)
+    method_kwargs = {} if method is None else {'method': method}
+    expected_method = 'oubrerie' if method is None else method
 
-    expected, expected_delay = mirror.add_constant_velocity_phase(
+    expected, *expected_terms = mirror.add_constant_velocity_phase(
         envelope,
         0.01,
+        method=expected_method,
+        compensate_elongation=compensate_elongation,
         return_correction_terms=True,
     )
     with pytest.warns(DeprecationWarning, match='ConstantIntensityAxiparabola'):
-        actual, actual_delay = add_constant_velocity_phase(
+        actual, *actual_terms = add_constant_velocity_phase(
             envelope,
             0.01,
             f0=focal_length,
             d0=focal_depth,
             R=radius,
+            **method_kwargs,
+            compensate_elongation=compensate_elongation,
             return_correction_terms=True,
         )
 
     np.testing.assert_allclose(actual.Field_ft, expected.Field_ft)
-    np.testing.assert_allclose(actual_delay.m_as('s'), expected_delay.m_as('s'))
+    for actual_term, expected_term in zip(actual_terms, expected_terms, strict=True):
+        np.testing.assert_allclose(actual_term.m_as(expected_term.units), expected_term.magnitude)
+    alpha, beta = mirror.calculate_constant_velocity_coefficients(0.01, method=expected_method)
+    r = envelope.r * ureg.m
+    np.testing.assert_allclose(actual_terms[0].m_as('s'), (alpha * r**2 + beta * r**4).m_as('s'))
 
 
-def test_calculate_constant_velocity_coefficients():
+@pytest.mark.parametrize('method', ['series', 'oubrerie'])
+@pytest.mark.parametrize('dv', [-0.1, 0.0, 0.1])
+def test_calculate_constant_velocity_coefficients(method, dv):
     """Velocity coefficients should be available without an envelope."""
     focal_length = 0.5 * ureg.m
     focal_depth = 10 * ureg.cm
     radius = 20 * ureg.mm
-    dv = 0.01
     c = ureg('speed_of_light')
     mirror = ConstantIntensityAxiparabola(focal_length, focal_depth, radius)
 
-    alpha, beta = mirror.calculate_constant_velocity_coefficients(dv)
+    alpha, beta = mirror.calculate_constant_velocity_coefficients(dv, method=method)
 
     expected_alpha = -dv * focal_depth / radius**2 / c
-    expected_beta = focal_depth / (4 * focal_length**2 * radius**2 * c) * (1 + 2 * dv)
+    expected_beta = focal_depth / (4 * focal_length**2 * radius**2 * c)
+    if method == 'series':
+        expected_alpha /= 1 + dv
+    else:
+        expected_beta *= 1 + 2 * dv
     np.testing.assert_allclose(alpha.m_as('s/m**2'), expected_alpha.m_as('s/m**2'))
     np.testing.assert_allclose(beta.m_as('s/m**4'), expected_beta.m_as('s/m**4'))
+
+
+@pytest.mark.parametrize('dv', [-0.1, 0.0, 0.1])
+@pytest.mark.parametrize('focal_depth', [-5 * ureg.cm, 10 * ureg.cm])
+def test_constant_velocity_series_matches_ray_geometry(dv, focal_depth):
+    """The series should cancel the velocity error through quadratic order."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, focal_depth, 20 * ureg.mm, beam_radius=15 * ureg.mm)
+    r = np.array([0.5, 1.0, 2.0]) * ureg.mm
+    alpha, beta = mirror.calculate_constant_velocity_coefficients(dv)
+    derivative = 2 * alpha * r + 4 * beta * r**3
+    velocity = mirror.velocity_on_axis(r, tau_delay_der=derivative)
+    error = np.abs(velocity - (1 + dv))
+    # The first omitted delay term is r**6, giving a velocity error of r**4.
+    np.testing.assert_allclose(error[1:] / error[:-1], 16, rtol=0.01)
+    np.testing.assert_allclose(velocity, 1 + dv, rtol=3e-7)
+
+    old_alpha, old_beta = mirror.calculate_constant_velocity_coefficients(dv, method='oubrerie')
+    old_velocity = mirror.velocity_on_axis(r, tau_delay_der=2 * old_alpha * r + 4 * old_beta * r**3)
+    if dv != 0:
+        assert np.max(error) < np.min(np.abs(old_velocity - (1 + dv)))
+
+
+@pytest.mark.parametrize(
+    ('dv', 'method', 'message'),
+    [
+        (0.01, 'unknown', 'method'),
+        (np.nan, 'series', 'finite'),
+        (np.inf, 'oubrerie', 'finite'),
+        (-1.0, 'series', 'differ from -1'),
+    ],
+)
+def test_constant_velocity_coefficients_reject_invalid_input(dv, method, message):
+    """Invalid methods and undefined velocities should fail explicitly."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, 10 * ureg.cm, 20 * ureg.mm)
+    with pytest.raises(ValueError, match=message):
+        mirror.calculate_constant_velocity_coefficients(dv, method=method)
