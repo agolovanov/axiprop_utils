@@ -149,6 +149,59 @@ def test_ray_radius(ray_mirror, r0_mm):
     np.testing.assert_allclose(scalar_r.m_as('mm'), r0_mm, rtol=1e-13, atol=1e-13)
 
 
+def test_annular_spot_sizes(ray_mirror):
+    """Spot boundaries should give zero and half-maximum intensity in J0 squared."""
+    from scipy.special import j0
+
+    r = np.array([1, 5, 20]) * ureg.mm
+    k0 = 2 * np.pi / (800 * ureg.nm)
+    first_zero = ray_mirror.spot_radius_first_zero(r, k0=k0)
+    fwhm = ray_mirror.spot_fwhm(r, k0=k0)
+    transverse_k = k0 * r / ray_mirror.focal_distance(r)
+    assert first_zero.shape == fwhm.shape == r.shape
+    assert first_zero.check('[length]')
+    assert fwhm.check('[length]')
+    np.testing.assert_allclose(j0((transverse_k * first_zero).m_as('')) ** 2, 0, atol=1e-28)
+    np.testing.assert_allclose(j0((transverse_k * fwhm / 2).m_as('')) ** 2, 0.5, rtol=1e-12)
+    np.testing.assert_allclose(
+        ray_mirror.spot_fwhm(r.to('cm'), k0=(2 * k0).to('1/cm')).m_as('m'),
+        fwhm.m_as('m') / 2,
+        rtol=1e-12,
+    )
+
+
+@pytest.mark.parametrize('method', ['spot_radius_first_zero', 'spot_fwhm'])
+def test_spot_size_vertex_and_scalar(ray_mirror, method):
+    """Scalar radii should preserve shape and have an infinite vertex limit."""
+    spot = getattr(ray_mirror, method)
+    k0 = 1e7 / ureg.m
+    with np.errstate(divide='raise', invalid='raise'):
+        vertex = spot(0 * ureg.mm, k0=k0)
+        values = spot(np.array([0, 10]) * ureg.mm, k0=k0)
+    assert vertex.shape == ()
+    assert np.isposinf(vertex.m_as('m'))
+    assert np.isposinf(values[0].m_as('m'))
+    np.testing.assert_allclose(spot(10 * ureg.mm, k0=k0).m_as('m'), values[1].m_as('m'))
+
+
+@pytest.mark.parametrize('method', ['spot_radius_first_zero', 'spot_fwhm'])
+@pytest.mark.parametrize(
+    ('r', 'k0', 'error'),
+    [
+        (1 * ureg.mm, 1e7, TypeError),
+        (1 * ureg.mm, 1 * ureg.m, pint.DimensionalityError),
+        (1 * ureg.mm, -1 / ureg.m, ValueError),
+        (1 * ureg.mm, np.array([1e7]) / ureg.m, ValueError),
+        (-1 * ureg.mm, 1e7 / ureg.m, ValueError),
+        (np.nan * ureg.mm, 1e7 / ureg.m, ValueError),
+    ],
+)
+def test_spot_size_validation(focal_map_mirror, method, r, k0, error):
+    """Spot estimates require non-negative radii and a scalar wavenumber quantity."""
+    with pytest.raises(error):
+        getattr(focal_map_mirror, method)(r, k0=k0)
+
+
 @pytest.mark.parametrize('z0_cm', [30, 70])
 def test_ray_snapshot(ray_mirror, z0_cm):
     """Snapshots should preserve equal travel times and the reflection direction."""

@@ -437,6 +437,74 @@ class AxisymmetricMirror(ABC):
         field = np.sqrt(2 * intensity / (ureg.vacuum_permittivity * c))
         return (ureg.elementary_charge * field / (ureg.electron_mass * c**2 * k0)).m_as('')
 
+    def spot_radius_first_zero(self, r: Quantity, *, k0: Quantity) -> Quantity:
+        """Estimate the first-zero radius of an annulus's focal spot.
+
+        Parameters
+        ----------
+        r : pint.Quantity, scalar or array
+            Non-negative radii on the mirror.
+        k0 : pint.Quantity
+            Positive scalar carrier wavenumber in inverse-length units.
+
+        Returns
+        -------
+        pint.Quantity, scalar or array
+            First-zero spot radius at z = focal_distance(r), in metres.
+            Returns infinity at r = 0.
+
+        Notes
+        -----
+        Assumes the paraxial annular intensity profile
+        ``J0(k0 * spot_r * r / focal_distance(r))**2``. The first zero is at
+        ``spot_r = j_01 * focal_distance(r) / (k0 * r)``.
+        This describes each annulus separately, not the combined profile of
+        overlapping focal branches. The approximation fails near r = 0.
+        """
+        from scipy.special import jn_zeros
+
+        if not isinstance(k0, pint.Quantity):
+            raise TypeError('k0 must be a pint.Quantity with inverse-length units')
+        k0_m = k0.m_as('1/m')
+        if np.ndim(k0_m) != 0 or not np.isfinite(k0_m) or k0_m <= 0:
+            raise ValueError('k0 must be a positive, finite scalar wavenumber')
+        r_m = np.asarray(r.m_as('m'))
+        if not np.all(np.isfinite(r_m)) or np.any(r_m < 0):
+            raise ValueError('r must be finite and non-negative')
+        focal_m = self.focal_distance(r).m_as('m')
+        radius_m = np.divide(
+            jn_zeros(0, 1)[0] * focal_m,
+            k0_m * r_m,
+            out=np.full(r_m.shape, np.inf),
+            where=r_m > 0,
+        )
+        return radius_m * ureg.m
+
+    def spot_fwhm(self, r: Quantity, *, k0: Quantity) -> Quantity:
+        """Estimate the full width at half maximum of an annulus's focal spot.
+
+        Parameters
+        ----------
+        r : pint.Quantity, scalar or array
+            Non-negative radii on the mirror.
+        k0 : pint.Quantity
+            Positive scalar carrier wavenumber in inverse-length units.
+
+        Returns
+        -------
+        pint.Quantity, scalar or array
+            Full intensity width at half maximum at z = focal_distance(r),
+            in metres. Returns infinity at r = 0.
+
+        Notes
+        -----
+        Uses the same paraxial J0**2 profile and limitations as
+        spot_radius_first_zero. The full width is twice the radius where
+        the central lobe reaches half its peak intensity.
+        """
+        # 2 * x_half / j_01, where J0(x_half)**2 = 1/2 in the central lobe.
+        return 0.9367533838558382 * self.spot_radius_first_zero(r, k0=k0)
+
     def ray_radius(self, z: Quantity, r0: Quantity) -> Quantity:
         """Evaluate the signed radius along a reflected ray.
 
