@@ -5,6 +5,7 @@ from __future__ import annotations
 import typing
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -21,6 +22,19 @@ def _length_magnitude(value: Quantity) -> np.ndarray:
     if not isinstance(value, pint.Quantity):
         raise TypeError('Lengths must be pint.Quantity objects')
     return np.asarray(value.m_as('m'))
+
+
+def _quantity_array(value: Quantity | Collection[Quantity]) -> Quantity:
+    if isinstance(value, pint.Quantity):
+        return ureg.Quantity(np.atleast_1d(value.magnitude).copy(), value.units)
+    if not isinstance(value, Collection):
+        raise TypeError('Lengths must be pint.Quantity objects or collections of scalar quantities')
+    items = list(value)
+    if any(not isinstance(item, pint.Quantity) for item in items):
+        raise TypeError('Collection entries must be pint.Quantity objects')
+    if any(np.ndim(item.magnitude) != 0 for item in items):
+        raise ValueError('Collection entries must be scalar quantities')
+    return ureg.Quantity.from_list(items) if items else ureg.Quantity([], 'm')
 
 
 class AxisymmetricMask(ABC):
@@ -590,6 +604,24 @@ class AxisymmetricMirror(ABC):
             velocity_ratio = focal_slope / (focal_slope * cos_theta + delay_slope)
         return np.asarray(velocity_ratio)
 
+    def supports_intensity_estimate(self) -> bool:
+        """Return whether this mirror supports intensity_on_axis and a0_on_axis.
+
+        Returns
+        -------
+        bool
+            False when the mirror requires diffraction to resolve its discrete
+            foci. True means the estimates are available with valid arguments;
+            their input validation and approximation limits still apply.
+
+        Notes
+        -----
+        The generic focal-map estimator is supported by default. Subclasses
+        with collapsed focal lines, discrete foci, or other incompatible
+        geometries must override this method.
+        """
+        return True
+
     def intensity_on_axis(
         self,
         z: Quantity,
@@ -639,6 +671,7 @@ class AxisymmetricMirror(ABC):
 
         This stationary-phase estimate ignores interference, pulse timing, and
         diffraction at caustics. Collapsed focal lines require diffraction.
+        Check supports_intensity_estimate() for mirror-level availability.
         """
         from axiprop.containers import ScalarFieldEnvelope
         from pic_utils.functions import density_1d
@@ -904,6 +937,141 @@ class AxisymmetricMirror(ABC):
         )
 
 
+class SegmentedParabolicMirror(AxisymmetricMirror):
+    """Continuous axisymmetric mirror with a constant focal distance per annulus.
+
+    Parameters
+    ----------
+    radial_edges : pint.Quantity or collection of scalar pint.Quantity
+        Positive, finite, strictly increasing outer radii of the segments.
+        The first segment starts at the axis; zero is implicit.
+        Supply an array quantity or a collection with N entries, or a scalar
+        quantity for one segment. Collection entries may use different units.
+    focal_distances : pint.Quantity or collection of scalar pint.Quantity
+        Positive, finite axial focal positions measured from the mirror vertex.
+        These are not focal lengths measured from each segment's own vertex.
+        Accepts the same input forms as radial_edges, with one entry per segment.
+
+    Notes
+    -----
+    Each annulus is part of a paraboloid, joined continuously to its neighbour.
+    The sag is zero at the axis. Slopes generally jump at internal edges;
+    values at an edge use the outer segment, including its one-sided slope.
+    The final edge belongs to the last segment. Radii outside the mirror are
+    rejected. Apply an aperture mask separately when modelling a larger beam.
+
+    Focal-distance derivatives are zero within segments and NaN at edges
+    where the focal distance jumps. The on-axis intensity approximation is
+    unavailable because discrete foci require a diffraction calculation.
+    """
+
+    def __init__(self, radial_edges: Quantity | Collection[Quantity], focal_distances: Quantity | Collection[Quantity]):
+        radial_edges = _quantity_array(radial_edges)
+        focal_distances = _quantity_array(focal_distances)
+        edges_m = _length_magnitude(radial_edges)
+        foci_m = _length_magnitude(focal_distances)
+        if edges_m.ndim != 1 or edges_m.size == 0:
+            raise ValueError('radial_edges must be one-dimensional with at least one entry')
+        if foci_m.ndim != 1 or foci_m.size != edges_m.size:
+            raise ValueError('focal_distances must have one entry per segment')
+        if not np.all(np.isfinite(edges_m)) or not np.all(np.isfinite(foci_m)):
+            raise ValueError('Mirror parameters must be finite')
+        if edges_m[0] <= 0 or np.any(np.diff(edges_m) <= 0):
+            raise ValueError('radial_edges must be positive and strictly increasing')
+        if np.any(foci_m <= 0):
+            raise ValueError('focal_distances must be positive')
+
+        self._radial_edges = radial_edges.copy()
+        self._focal_distances = focal_distances.copy()
+        self._edges_m = np.concatenate(([0.0], edges_m))
+        self._foci_m = foci_m.copy()
+        self._entry_sags_m = np.zeros_like(foci_m, dtype=float)
+        self._parabolic_lengths_m = np.empty_like(foci_m, dtype=float)
+        for i, focus in enumerate(foci_m):
+            a = self._edges_m[i]
+            distance = focus - self._entry_sags_m[i]
+            hypotenuse = np.hypot(distance, a)
+            # Use the conjugate root when subtraction would lose precision.
+            p = (distance + hypotenuse) / 2 if distance >= 0 else a * (a / (hypotenuse - distance)) / 2
+            self._parabolic_lengths_m[i] = p
+            if i + 1 < foci_m.size:
+                b = self._edges_m[i + 1]
+                self._entry_sags_m[i + 1] = self._entry_sags_m[i] + (b - a) * (b + a) / (4 * p)
+
+    @property
+    def radial_edges(self) -> Quantity:
+        """Outer radii of the segments, excluding the implicit zero."""
+        return self._radial_edges.copy()
+
+    @property
+    def focal_distances(self) -> Quantity:
+        """Axial focal positions measured from the mirror vertex."""
+        return self._focal_distances.copy()
+
+    @property
+    def radius(self) -> Quantity:
+        """Outer mirror radius."""
+        return self._radial_edges[-1].copy()
+
+    def _segment_indices(self, r: Quantity) -> tuple[np.ndarray, np.ndarray]:
+        r_m = _length_magnitude(r)
+        if not np.all(np.isfinite(r_m)) or np.any(r_m < 0):
+            raise ValueError('r must be finite and non-negative')
+        if np.any(r_m > self._edges_m[-1]):
+            raise ValueError('r cannot extend beyond the mirror radius')
+        indices = np.minimum(np.searchsorted(self._edges_m, r_m, side='right') - 1, self._foci_m.size - 1)
+        return r_m, indices
+
+    @typing.override
+    def sag(self, r: Quantity) -> Quantity:
+        r_m, indices = self._segment_indices(r)
+        a = self._edges_m[indices]
+        sag_m = self._entry_sags_m[indices] + (r_m - a) * (r_m + a) / (4 * self._parabolic_lengths_m[indices])
+        return sag_m * ureg.m
+
+    @typing.override
+    def _H_func(self, r: Quantity) -> Quantity:
+        _, indices = self._segment_indices(r)
+        return 1 / (2 * self._parabolic_lengths_m[indices]) / ureg.m
+
+    @typing.override
+    def focal_distance(self, r: Quantity) -> Quantity:
+        _, indices = self._segment_indices(r)
+        return self._foci_m[indices] * ureg.m
+
+    @typing.override
+    def focal_distance_der(self, r: Quantity) -> np.ndarray:
+        """Return zero within segments and NaN at focal-distance jumps.
+
+        At a jump the classical derivative is undefined; this method does not
+        represent the corresponding distributional delta function.
+        """
+        r_m, _ = self._segment_indices(r)
+        jumps = self._edges_m[1:-1][np.diff(self._foci_m) != 0]
+        return np.where(np.isin(r_m, jumps), np.nan, 0.0)
+
+    @typing.override
+    def supports_intensity_estimate(self) -> bool:
+        return False
+
+    @typing.override
+    def intensity_on_axis(
+        self,
+        z: Quantity,
+        scl: Quantity | ScalarFieldEnvelope,
+        *,
+        k0: Quantity | None = None,
+        radius: Quantity | None = None,
+        nr: int | None = None,
+    ) -> Quantity:
+        """Reject the stationary-phase estimate for discrete focal positions.
+
+        Use field propagation to calculate diffraction and interference at
+        these foci.
+        """
+        raise NotImplementedError('Discrete foci require a diffraction calculation')
+
+
 @dataclass(frozen=True)
 class ParabolicMirror(AxisymmetricMirror):
     """Axisymmetric parabolic mirror.
@@ -915,6 +1083,10 @@ class ParabolicMirror(AxisymmetricMirror):
     """
 
     focal_length: Quantity
+
+    @typing.override
+    def supports_intensity_estimate(self) -> bool:
+        return False
 
     def sag(self, r: Quantity) -> Quantity:
         """Evaluate the parabolic sag ``r**2 / (4 * focal_length)``."""

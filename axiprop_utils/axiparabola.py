@@ -6,13 +6,59 @@ import warnings
 import numpy as np
 import pint
 
-from .optical_elements import AxisymmetricMirror
+from .optical_elements import AxisymmetricMirror, SegmentedParabolicMirror
 
 ureg = pint.get_application_registry()
 
 if typing.TYPE_CHECKING:
     from axiprop import ScalarFieldEnvelope
     from pint import Quantity
+
+
+def axiparabola_segmented_mirror(
+    f0: 'Quantity', d0: 'Quantity', radius: 'Quantity', N: int, beam_radius: 'Quantity' = None
+) -> SegmentedParabolicMirror:
+    """Construct a segmented mirror sampling a constant-intensity axiparabola.
+
+    Parameters
+    ----------
+    f0 : pint.Quantity
+        Positive start of the nominal focal line, measured from the mirror vertex.
+    d0 : pint.Quantity
+        Signed focal depth at beam_radius.
+    radius : pint.Quantity
+        Positive outer mirror radius.
+    N : int
+        Positive number of equal-area radial segments and focal positions.
+    beam_radius : pint.Quantity, optional
+        Positive radius defining d0. Defaults to radius and cannot exceed it.
+
+    Returns
+    -------
+    SegmentedParabolicMirror
+        Continuous mirror with outer ring radii ``radius * sqrt(i / N)``,
+        for i = 1, ..., N. Ring i focuses at ``f0 + (i - 0.5) * h``, where
+        ``h = d0 * (radius / beam_radius)**2 / N``.
+
+    Notes
+    -----
+    This samples ``f(r) = f0 + d0 * (r / beam_radius)**2`` at the area
+    midpoint of each ring. Negative d0 reverses the focal order; zero d0
+    gives a parabolic mirror. As for ConstantIntensityAxiparabola, the
+    nominal focal line must remain positive over the entire aperture.
+    The first ring focuses half a step from f0, including the axial ray.
+    Equal ring areas imply equal incident powers only for uniform illumination.
+    """
+    if isinstance(N, (bool, np.bool_)) or not isinstance(N, (int, np.integer)) or N <= 0:
+        raise ValueError('N must be a positive integer')
+    parameters = (f0, d0, radius, radius if beam_radius is None else beam_radius)
+    if any(not isinstance(value, pint.Quantity) for value in parameters):
+        raise TypeError('Mirror parameters must be pint.Quantity objects')
+    nominal = ConstantIntensityAxiparabola(f0, d0, radius, beam_radius)
+    depth = nominal.focal_depth * (nominal.radius / nominal.beam_radius) ** 2
+    edges = nominal.radius * np.sqrt(np.arange(1, N + 1) / N)
+    foci = nominal.focal_length + depth * ((np.arange(N) + 0.5) / N)
+    return SegmentedParabolicMirror(edges, foci)
 
 
 class AxiparabolaPolynomial(AxisymmetricMirror):
@@ -78,6 +124,10 @@ class AxiparabolaPolynomial(AxisymmetricMirror):
         self._b2 = (1 / (4 * self._f0)).to('1/m')
         self._b4 = (-self._d0 / (8 * self._f0**2 * self._beam_radius**2)).to('1/m**3')
         self._b6 = (-self._kappa / (12 * self._f0**2 * self._beam_radius**4)).to('1/m**5')
+
+    @typing.override
+    def supports_intensity_estimate(self) -> bool:
+        return bool(self.d0.m_as('m') != 0 or self.kappa.m_as('m') != 0)
 
     @property
     def f0(self) -> 'Quantity':
@@ -200,6 +250,10 @@ class ConstantIntensityAxiparabola(AxisymmetricMirror):
         self._beam_radius = (radius if beam_radius is None else beam_radius).copy()
         self._sag_cache: tuple | None = None
         self._validate_parameters()
+
+    @typing.override
+    def supports_intensity_estimate(self) -> bool:
+        return bool(self.focal_depth.m_as('m') != 0)
 
     @property
     def focal_length(self) -> 'Quantity':

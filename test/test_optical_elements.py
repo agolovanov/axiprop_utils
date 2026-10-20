@@ -7,7 +7,15 @@ import pint
 import pytest
 from pic_utils import PlasmaUnits
 
-from axiprop_utils import ConstantIntensityAxiparabola, ParabolicMirror, mirror_parabolic, mirror_reflection
+from axiprop_utils import (
+    AxiparabolaPolynomial,
+    ConstantIntensityAxiparabola,
+    ParabolicMirror,
+    SegmentedParabolicMirror,
+    axiparabola_segmented_mirror,
+    mirror_parabolic,
+    mirror_reflection,
+)
 from axiprop_utils.optical_elements import AxisymmetricMirror
 from axiprop_utils.pulse import create_gaussian_pulse
 
@@ -29,6 +37,49 @@ def focal_map_mirror():
             return 0.5 * ureg.m + 0.1 * ureg.m * (r / (20 * ureg.mm)) ** 2
 
     return FocalMapMirror()
+
+
+def test_generic_mirror_supports_intensity_estimate(focal_map_mirror):
+    """Custom focal maps inherit support for the generic estimator."""
+    assert focal_map_mirror.supports_intensity_estimate() is True
+
+
+@pytest.mark.parametrize('depth', [-0.1, 0, 0.1])
+def test_axiparabola_supports_intensity_estimate(depth):
+    """Only a nonzero focal depth supports the continuous focal-line estimates."""
+    mirror = ConstantIntensityAxiparabola(0.5 * ureg.m, depth * ureg.m, 20 * ureg.mm)
+    assert mirror.supports_intensity_estimate() is (depth != 0)
+
+
+@pytest.mark.parametrize(('depth', 'curvature'), [(0, 0), (0.1, 0), (0, 0.1), (-0.1, 0.1)])
+def test_polynomial_supports_intensity_estimate(depth, curvature):
+    """Either higher-order sag coefficient can provide an extended focal map."""
+    mirror = AxiparabolaPolynomial(0.5 * ureg.m, depth * ureg.m, curvature * ureg.m, 20 * ureg.mm)
+    assert mirror.supports_intensity_estimate() is (depth != 0 or curvature != 0)
+
+
+@pytest.mark.parametrize(
+    'mirror',
+    [
+        ParabolicMirror(0.5 * ureg.m),
+        ConstantIntensityAxiparabola(0.5 * ureg.m, 0 * ureg.m, 20 * ureg.mm),
+        AxiparabolaPolynomial(0.5 * ureg.m, 0 * ureg.m, 0 * ureg.m, 20 * ureg.mm),
+        SegmentedParabolicMirror([10, 20] * ureg.mm, [0.5, 0.6] * ureg.m),
+        axiparabola_segmented_mirror(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm, N=2),
+    ],
+)
+@pytest.mark.parametrize('method', ['intensity_on_axis', 'a0_on_axis'])
+def test_discrete_foci_do_not_support_on_axis_estimates(mirror, method):
+    """The capability flag agrees with both estimation methods' restrictions."""
+    assert mirror.supports_intensity_estimate() is False
+    with pytest.raises((ValueError, NotImplementedError), match='diffraction'):
+        getattr(mirror, method)(
+            np.linspace(0.4, 0.7, 31) * ureg.m,
+            1 * ureg('W/cm**2'),
+            k0=1e7 / ureg.m,
+            radius=20 * ureg.mm,
+            nr=101,
+        )
 
 
 def test_intensity_on_axis_generic_mirror(focal_map_mirror):

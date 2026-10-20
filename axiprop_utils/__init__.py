@@ -7,8 +7,20 @@ import numpy as np
 import pint
 from axiprop.containers import ScalarFieldEnvelope
 
-from .axiparabola import AxiparabolaPolynomial, ConstantIntensityAxiparabola, mirror_axiparabola
-from .optical_elements import AxisymmetricMask, AxisymmetricMirror, Hole, ParabolicMirror, SuperGaussianHole
+from .axiparabola import (
+    AxiparabolaPolynomial,
+    ConstantIntensityAxiparabola,
+    axiparabola_segmented_mirror,
+    mirror_axiparabola,
+)
+from .optical_elements import (
+    AxisymmetricMask,
+    AxisymmetricMirror,
+    Hole,
+    ParabolicMirror,
+    SegmentedParabolicMirror,
+    SuperGaussianHole,
+)
 from .pulse import create_gaussian_pulse
 
 if typing.TYPE_CHECKING:

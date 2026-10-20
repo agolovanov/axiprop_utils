@@ -10,6 +10,8 @@ from axiprop_utils import (
     AxiparabolaPolynomial,
     ConstantIntensityAxiparabola,
     ParabolicMirror,
+    SegmentedParabolicMirror,
+    axiparabola_segmented_mirror,
     mirror_axiparabola,
     mirror_parabolic,
 )
@@ -18,6 +20,75 @@ from axiprop_utils.optical_elements import AxisymmetricMirror
 from axiprop_utils.pulse import create_gaussian_pulse
 
 ureg = pint.get_application_registry()
+
+
+@pytest.mark.parametrize('N', [1, 2, np.int64(7)])
+@pytest.mark.parametrize('depth_mm', [-20, 0, 20])
+@pytest.mark.parametrize('beam_radius', [None, 10 * ureg.mm])
+def test_segmented_axiparabola_mapping(N, depth_mm, beam_radius):
+    """Equal-area rings sample the scaled focal line at their area midpoints."""
+    f0, d0, radius = 50 * ureg.cm, depth_mm * ureg.mm, 20 * ureg.mm
+    mirror = axiparabola_segmented_mirror(f0, d0, radius, N=N, beam_radius=beam_radius)
+    assert isinstance(mirror, SegmentedParabolicMirror)
+    edges = mirror.radial_edges
+    areas = np.pi * np.diff(np.concatenate(([0], edges.m_as('m') ** 2)))
+    np.testing.assert_allclose(areas, (np.pi * radius**2 / N).m_as('m**2'), rtol=1e-14)
+    nominal = ConstantIntensityAxiparabola(f0, d0, radius, beam_radius)
+    inner_radii_squared = np.concatenate(([0], edges.m_as('m')[:-1] ** 2))
+    midpoints = np.sqrt((inner_radii_squared + edges.m_as('m') ** 2) / 2) * ureg.m
+    np.testing.assert_allclose(
+        mirror.focal_distances.m_as('m'), nominal.focal_distance(midpoints).m_as('m'), rtol=1e-14
+    )
+    depth = d0 * (radius / (radius if beam_radius is None else beam_radius)) ** 2
+    np.testing.assert_allclose(mirror.focal_distances[0].m_as('m'), (f0 + depth / (2 * N)).m_as('m'), rtol=1e-14)
+    np.testing.assert_allclose(
+        mirror.focal_distances[-1].m_as('m'), (f0 + depth - depth / (2 * N)).m_as('m'), rtol=1e-14
+    )
+    assert mirror.radius == radius
+    np.testing.assert_allclose(
+        AxisymmetricMirror.focal_distance(mirror, midpoints).m_as('m'),
+        mirror.focal_distances.m_as('m'),
+        rtol=1e-14,
+    )
+    if depth_mm == 0:
+        np.testing.assert_allclose(
+            mirror.sag(midpoints).m_as('m'), ParabolicMirror(f0).sag(midpoints).m_as('m'), rtol=1e-14
+        )
+
+
+@pytest.mark.parametrize('N', [0, -1, 2.5, True, np.bool_(False)])
+def test_segmented_axiparabola_invalid_count(N):
+    """The number of rings must be a positive integer."""
+    with pytest.raises(ValueError, match='N must be a positive integer'):
+        axiparabola_segmented_mirror(0.5 * ureg.m, 0.1 * ureg.m, 20 * ureg.mm, N)
+
+
+@pytest.mark.parametrize(
+    'kwargs',
+    [
+        {'f0': -1 * ureg.m},
+        {'d0': np.nan * ureg.m},
+        {'radius': 0 * ureg.mm},
+        {'beam_radius': 0 * ureg.mm},
+        {'beam_radius': 30 * ureg.mm},
+        {'d0': -0.2 * ureg.m, 'beam_radius': 10 * ureg.mm},
+        {'f0': np.array([0.5, 0.6]) * ureg.m},
+    ],
+)
+def test_segmented_axiparabola_invalid_parameters(kwargs):
+    """Use the same scalar and focal-line validation as the continuous mirror."""
+    parameters = dict(f0=0.5 * ureg.m, d0=0.1 * ureg.m, radius=20 * ureg.mm, N=2)
+    parameters.update(kwargs)
+    with pytest.raises(ValueError):
+        axiparabola_segmented_mirror(**parameters)
+
+
+def test_segmented_axiparabola_requires_lengths():
+    """Reject unitless parameters and quantities with incompatible dimensions."""
+    with pytest.raises(TypeError, match='pint.Quantity'):
+        axiparabola_segmented_mirror(0.5, 0.1 * ureg.m, 20 * ureg.mm, 2)
+    with pytest.raises(pint.DimensionalityError):
+        axiparabola_segmented_mirror(0.5 * ureg.s, 0.1 * ureg.m, 20 * ureg.mm, 2)
 
 
 def test_polynomial_coefficients_and_beam_radius():
